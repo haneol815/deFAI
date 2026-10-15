@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "deffai"
+version = "0.1.0"
+description = "Federated learning assignment template built on Flower"
+license = {file = "LICENSE"}
+requires-python = ">=3.11"
+dependencies = [
+    "flwr[simulation]>=1.40.0",
+    "flwr-datasets[vision]>=0.6.1",
+    "torch>=2.1",
+    "torchvision>=0.16",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "rixile9999"
+fab-format-version = 1
+flwr-version-target = "1.40.0"
+
+[tool.flwr.app.components]
+serverapp = "deffai.server_app:app"
+clientapp = "deffai.client_app:app"
+
+# Override at runtime: flwr run . --run-config "num-server-rounds=20 strategy='fedprox'"
+[tool.flwr.app.config]
+# federation
+num-server-rounds = 10
+strategy = "fedavg"         # fedavg | fedprox
+proximal-mu = 0.01          # FedProx only
+fraction-train = 0.5        # fraction of SuperNodes sampled per round
+fraction-evaluate = 0.5
+# data
+dataset = "mnist"           # mnist | cifar10
+partitioner = "iid"         # iid | dirichlet
+dirichlet-alpha = 0.5       # smaller = more non-IID
+seed = 42
+# local training
+local-epochs = 1
+batch-size = 32
+learning-rate = 0.01
+# output
+output-dir = "results"
+save-model = false
