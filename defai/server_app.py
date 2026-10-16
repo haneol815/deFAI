@@ -9,7 +9,7 @@ from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 from flwr.serverapp.strategy import FedAvg, FedProx
 
-from deffai.task import build_model, get_device, load_centralized_testset, test
+from defai.task import build_model, get_device, load_centralized_testset, test
 
 app = ServerApp()
 

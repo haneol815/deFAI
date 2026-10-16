@@ -13,7 +13,7 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 ```
 .
 ├── pyproject.toml          # Dependencies + Flower app settings (run config)
-├── deffai/
+├── defai/
 │   ├── server_app.py       # ServerApp: strategy selection, rounds, centralized eval, result saving
 │   ├── client_app.py       # ClientApp: local training / evaluation
 │   └── task.py             # Model, data partitioning/loading, train/test functions

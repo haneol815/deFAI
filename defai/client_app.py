@@ -3,9 +3,9 @@
 from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
 
-from deffai.task import build_model, get_device, load_client_data
-from deffai.task import test as test_fn
-from deffai.task import train as train_fn
+from defai.task import build_model, get_device, load_client_data
+from defai.task import test as test_fn
+from defai.task import train as train_fn
 
 app = ClientApp()
 

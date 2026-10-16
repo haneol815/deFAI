@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "deffai"
+name = "defai"
 version = "0.1.0"
 description = "Federated learning assignment template built on Flower"
 license = {file = "LICENSE"}
@@ -27,8 +27,8 @@ fab-format-version = 1
 flwr-version-target = "1.40.0"
 
 [tool.flwr.app.components]
-serverapp = "deffai.server_app:app"
-clientapp = "deffai.client_app:app"
+serverapp = "defai.server_app:app"
+clientapp = "defai.client_app:app"
 
 # Override at runtime: flwr run . --run-config "num-server-rounds=20 strategy='fedprox'"
 [tool.flwr.app.config]
