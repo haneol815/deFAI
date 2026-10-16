@@ -1,4 +1,4 @@
-# defFAI — Federated Learning Assignment
+# deFAI — Federated Learning Assignment
 
 A federated learning (FL) assignment template built on [Flower](https://flower.ai).
 It simulates multiple clients (SuperNodes) on a single machine with the Flower Simulation Engine,
