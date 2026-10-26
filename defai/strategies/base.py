@@ -210,6 +210,10 @@ class FedAvg(Strategy):
             return f"'{self.weighted_by_key}' must be a positive finite number, got {weight!r}"
         if not train:
             return None
+        if self.dp is not None and self.dp.adaptive and self.dp.side == "client":
+            bit = metrics.get(KEY_UNCLIPPED_BIT)
+            if isinstance(bit, bool) or bit not in (0, 1):
+                return f"'{KEY_UNCLIPPED_BIT}' must be 0 or 1, got {bit!r}"
         for key in (KEY_ARRAYS, *self.extra_reply_records):
             if not isinstance(content.get(key), ArrayRecord):
                 return f"missing ArrayRecord '{key}'"

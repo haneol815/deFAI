@@ -131,6 +131,7 @@ class _GaussianDP:
         if len(updates) > num_sampled:
             raise ValueError("more updates than sampled clients would void the sensitivity bound")
 
+        self._validate_bits(unclipped_bits)  # before anything is released or accounted
         clip_norm = self.clip_norm  # the norm used for *this* round
         total = {k: np.zeros(v.shape, dtype=np.float64) for k, v in updates[0].items()}
         num_clipped = 0
@@ -160,6 +161,9 @@ class _GaussianDP:
     # --- hooks ---------------------------------------------------------------
     def _update_noise_multiplier(self, num_sampled: int) -> float:
         return self.noise_multiplier
+
+    def _validate_bits(self, unclipped_bits) -> None:
+        """Hook: reject malformed client-reported bits (only adaptive clipping uses them)."""
 
     def _update_clip_norm(self, num_sampled, num_replies, num_clipped, unclipped_bits) -> None:
         """Fixed clipping keeps C constant."""
@@ -218,12 +222,17 @@ class AdaptiveClipping(_GaussianDP):
     def _update_noise_multiplier(self, num_sampled: int) -> float:
         return adaptive_noise_multiplier(self.noise_multiplier, self._bit_std(num_sampled))
 
+    def _validate_bits(self, unclipped_bits) -> None:
+        if self.side != "client":
+            return
+        if unclipped_bits is None or any(b is None for b in unclipped_bits):
+            raise ValueError(f"client-side adaptive clipping needs every reply to carry '{KEY_UNCLIPPED_BIT}'")
+        if any(b not in (0, 1) for b in unclipped_bits):
+            # The bit query's sensitivity bound (and the clip-norm update) assume each bit is 0 or 1
+            raise ValueError(f"'{KEY_UNCLIPPED_BIT}' must be 0 or 1, got {sorted(set(unclipped_bits))}")
+
     def _update_clip_norm(self, num_sampled, num_replies, num_clipped, unclipped_bits) -> None:
         if self.side == "client":
-            if unclipped_bits is None or any(b is None for b in unclipped_bits):
-                raise ValueError(
-                    f"client-side adaptive clipping needs every reply to carry '{KEY_UNCLIPPED_BIT}'"
-                )
             num_unclipped = float(sum(int(b) for b in unclipped_bits))
         else:
             num_unclipped = float(num_replies - num_clipped)

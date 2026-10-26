@@ -164,3 +164,11 @@ def test_begin_round_rejects_an_infeasible_explicit_bit_noise_with_an_actionable
     with pytest.raises(ValueError, match="dp-clipped-count-stddev"):
         dp.begin_round(5)
     AdaptiveClipping(1.0, 1.0, clipped_count_stddev=0.6).begin_round(5)  # 2 * 0.6 > 1: fine
+
+
+@pytest.mark.parametrize("bad", [[1, 1, 1, 2], [1, 1, 1, 10**6], [1, 1, 1, -1], [1, 1, 1, None]])
+def test_client_reported_bits_must_be_zero_or_one_and_are_checked_before_accounting(bad):
+    dp = AdaptiveClipping(1.0, 1.0, side="client", seed=0)
+    with pytest.raises(ValueError):
+        dp.aggregate([update_with_norm(0.5)] * 4, 4, unclipped_bits=bad)
+    assert dp.accountant.num_releases == 0 and dp.clip_norm == 1.0  # nothing was spent or changed
