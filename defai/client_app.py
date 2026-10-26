@@ -58,6 +58,8 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     device = get_device()
     lr = config["lr"]
+    # Reproducible local training (data order) for a given seed, whichever worker runs the client
+    torch.manual_seed(int(np.random.SeedSequence([cfg["seed"], partition_id, config["server-round"]]).generate_state(1)[0]))
 
     model = build_model(cfg["dataset"])
     model.load_state_dict(msg.content["arrays"].to_torch_state_dict())
