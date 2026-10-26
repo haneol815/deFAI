@@ -111,3 +111,13 @@ def test_bulyan_select_is_iterated_krum_and_drops_the_outliers():
 def test_bulyan_select_handles_exhaustion():
     d = pairwise_sq_distances([U(0), U(1), U(2)])
     assert sorted(bulyan_select(d, 0, 10)) == [0, 1, 2]
+
+
+def test_integer_arrays_are_rounded_not_truncated():
+    from defai.aggregation import cast_like
+
+    np.testing.assert_array_equal(cast_like(np.array([257.9999999, 258.4, -0.6]), np.int64), [258, 258, -1])
+    assert cast_like(np.array([1.5]), np.float32).dtype == np.float32
+    ints = [{"n": np.array([258], dtype=np.int64)}] * 3
+    out = weighted_mean(ints, [0.1, 0.2, 0.7])
+    assert out["n"].dtype == np.int64 and out["n"][0] == 258
