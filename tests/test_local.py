@@ -194,3 +194,16 @@ def test_net_head_of_representation_is_forward():
     net = Net().eval()
     x = torch.randn(3, 1, 28, 28)
     torch.testing.assert_close(net.head(net.represent(x)), net(x))
+
+
+def test_cifar10_model_has_the_right_shapes_for_training_and_moon():
+    from defai.task import build_model
+
+    net = build_model("cifar10").eval()
+    x = torch.randn(2, 3, 32, 32)
+    assert net(x).shape == (2, 10)
+    assert net.represent(x).shape == (2, 512)
+    net.train()
+    loss = F.cross_entropy(net(x), torch.tensor([1, 2]))
+    loss.backward()
+    assert all(p.grad is not None for p in net.parameters())
