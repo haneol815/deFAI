@@ -1,11 +1,13 @@
 import json
 import math
 
+import numpy as np
 from flwr.app import MetricRecord
 from flwr.serverapp.strategy import Result
 
 from defai.privacy.dp import FixedClipping
-from defai.results import build_history, jsonable, privacy_summary, run_name, write_summary
+from defai.records import to_record
+from defai.results import build_history, final_arrays, jsonable, privacy_summary, run_name, write_summary
 
 BASE = {"dataset": "mnist", "strategy": "fedavg", "partitioner": "iid", "dp": "none", "dp-side": "server",
         "attack": "none", "num-malicious": 0}
@@ -53,3 +55,12 @@ def test_privacy_summary_for_a_finite_budget():
     dp.accountant.compose(1.0, 3)
     out = privacy_summary(dp)
     assert out["epsilon"] == dp.epsilon and out["epsilon_unbounded"] is False and out["rounds_accounted"] == 3
+
+
+def test_final_model_falls_back_to_the_initial_one_when_no_round_trained():
+    initial = to_record({"w": np.arange(3, dtype=np.float32)})
+    empty = Result()
+    assert final_arrays(empty, initial) is initial  # used to save an empty state dict
+    trained = Result()
+    trained.arrays = to_record({"w": np.ones(3, dtype=np.float32)})
+    assert final_arrays(trained, initial) is trained.arrays

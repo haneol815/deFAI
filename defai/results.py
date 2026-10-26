@@ -4,6 +4,7 @@ import json
 import math
 import time
 
+from flwr.app import ArrayRecord
 from flwr.serverapp.strategy import Result
 
 
@@ -58,3 +59,12 @@ def privacy_summary(dp) -> dict:
 def write_summary(path, summary: dict) -> None:
     with open(path, "w") as f:
         json.dump(jsonable(summary), f, indent=2, allow_nan=False)
+
+
+def final_arrays(result: Result, initial_arrays: ArrayRecord) -> ArrayRecord:
+    """The trained model, or the initial one when no round produced an aggregate.
+
+    That happens when training stops before the first round (a privacy budget below the first
+    round's epsilon, ``fraction-train=0``); ``Result.arrays`` is then empty.
+    """
+    return result.arrays if len(result.arrays) else initial_arrays
