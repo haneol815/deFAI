@@ -69,6 +69,14 @@ flwr run . --stream --federation-config "num-supernodes=10" \
   To change the default permanently instead:
   `flwr federation simulation-config --num-supernodes 10`
 - Results are saved to `results/<dataset>_<strategy>_<partitioner>[_dp-...][_<attack>x<n>]_<timestamp>/history.json`.
+- The run config is validated before the first round (`defai/config.py`): a typo such as `attack='signflip'`, an
+  out-of-range value, or DP combined with a strategy that cannot support it is rejected with the offending keys listed.
+- Runs are reproducible for a given `seed`: model initialisation, client sampling (nodes are ordered by registration time,
+  because node ids are random), every client's data order (seeded from `seed`, partition and round), the aggregation
+  order and the DP noise are all fixed. Checked with `flwr run`: same seed gives bitwise identical `history.json`
+  metrics on CPU; GPU kernels may add run-to-run noise.
+- `history.json` is strict JSON: non-finite numbers (e.g. an infinite epsilon) are written as `null`.
+- A `ServerApp` exception does not change the exit code of `flwr run`; look for a `Traceback` in the log.
 - `dataset='synthetic'` generates MNIST-like images locally, so a run needs no download. This is handy for smoke tests
   and in environments without access to Hugging Face.
 - Recent Flower versions build a fresh virtual environment per `flwr run` and reinstall the app's dependencies.
@@ -79,6 +87,18 @@ flwr run . --stream --federation-config "num-supernodes=10" \
 pip install -e ".[plot]"
 python scripts/plot.py results/*/history.json -o results/acc.png
 python scripts/plot.py results/*/history.json -m dp-epsilon -o results/eps.png   # any history key
+python scripts/compare.py results/*/history.json --target 0.95                   # one row per configuration
+```
+`compare.py` groups runs that differ only in `seed` and reports mean ± std, so comparing algorithms is a loop away
+(a single seed is too noisy to rank algorithms, especially on non-IID data):
+```bash
+for seed in 1 2 3; do
+  for s in fedavg fedprox scaffold moon; do
+    flwr run . --stream --federation-config "num-supernodes=10" \
+      --run-config "strategy='$s' partitioner='dirichlet' dirichlet-alpha=0.1 num-server-rounds=30 seed=$seed"
+  done
+done
+python scripts/compare.py results/*/history.json
 ```
 
 ## Algorithms
