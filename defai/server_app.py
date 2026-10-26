@@ -8,6 +8,7 @@ import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 
+from defai.config import validate_config
 from defai.strategies import build_strategy
 from defai.task import build_model, get_device, load_centralized_testset, test
 
@@ -26,6 +27,7 @@ def _run_name(cfg):
 @app.main()
 def main(grid: Grid, context: Context) -> None:
     cfg = context.run_config
+    validate_config(cfg)
     torch.manual_seed(cfg["seed"])
     model = build_model(cfg["dataset"])
     testloader = load_centralized_testset(cfg["dataset"])
