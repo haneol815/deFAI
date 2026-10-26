@@ -155,9 +155,17 @@ flwr run . --stream --federation-config "num-supernodes=10" --run-config \
 - `dp-side='server'`: the server clips the updates. `dp-side='client'`: clients clip before sending (adaptive mode:
   they also report whether they were clipped); the server still enforces the bound, so it holds for faulty clients too.
 - `dp='adaptive'` tracks the `dp-target-quantile` of the update norms (Andrew et al., 2019) and spends part of the
-  noise budget on the clipped-count query so that the overall noise multiplier stays `dp-noise-multiplier`.
-- `epsilon` is tracked per round (`dp-epsilon` in `history.json`, plus a `privacy` summary). With `dp-max-epsilon > 0`,
-  training stops before a round that would exceed the budget.
+  noise budget on the clipped-count query so that the overall noise multiplier stays `dp-noise-multiplier`. The count's
+  noise std defaults to `max(clients per round / 20, dp-noise-multiplier)`; if you set `dp-clipped-count-stddev`
+  yourself it must exceed half the noise multiplier, which is checked before the first client trains.
+- `epsilon` is tracked per round (`dp-epsilon` in `history.json`, plus a `privacy` summary; `null` plus
+  `epsilon_unbounded: true` when the noise multiplier is 0). With `dp-max-epsilon > 0`, training stops before a round
+  that would exceed the budget (evaluation continues, and `save-model` then saves the initial model if no round ran).
+- Only quantities covered by the accounting are published: fixed clipping releases no clipping statistic, adaptive
+  clipping releases `dp-noisy-unclipped-fraction` (the noisy fraction that drives the clip-norm update). The exact number
+  of clipped clients is never written out. To tune `dp-clip-norm`, use the adaptive mode and read its `dp-clip-norm` curve.
+- In client-side adaptive mode a reply whose `dp-unclipped-bit` is not 0 or 1 is dropped, so one faulty client cannot
+  steer the clip norm.
 
 What the guarantee does and does not cover:
 - It is (ε, δ)-DP for the released model updates under add/remove-one-client adjacency, accounted with Rényi DP.
