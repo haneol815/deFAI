@@ -87,3 +87,24 @@ def run_strategy(strategy, clients, num_nodes, rounds, dim=4, start=None):
         train_config=ConfigRecord({"lr": clients.lr}),
     )
     return to_arrays(result.arrays)["w"].astype(np.float64), result, grid
+
+
+class RegistrationOrderGrid(FakeGrid):
+    """Like the simulation: random node ids, registered one after the other (``get_nodes`` order is not id order)."""
+
+    def __init__(self, num_nodes, client_fn, seed):
+        super().__init__(num_nodes, client_fn)
+        rng = np.random.default_rng(seed)
+        self.nodes = [int(i) for i in rng.integers(1, 2**62, size=num_nodes)]  # position i == partition i
+        self.targets = dict(enumerate(self.nodes))
+
+    def get_node_ids(self):
+        return set(self.nodes)  # unordered, as in the SuperLink state
+
+    def get_nodes(self):
+        from flwr.proto.node_pb2 import NodeInfo
+
+        shuffled = list(self.nodes)
+        np.random.default_rng(0).shuffle(shuffled)  # the server must not rely on delivery order either
+        position = {n: i for i, n in enumerate(self.nodes)}
+        return [NodeInfo(node_id=n, registered_at=f"2026-01-01T00:00:00.{position[n]:06d}+00:00") for n in shuffled]
