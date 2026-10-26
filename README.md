@@ -187,7 +187,8 @@ pytest
 The suite covers the aggregation rules, the accountant (cross-checked against Google's `dp-accounting` and against the
 exact Gaussian-mechanism δ(ε)), DP clipping/noise/adaptive-quantile convergence, every server strategy through
 `Strategy.start()` on a toy quadratic federation, the local-training hooks against hand-computed SGD, and
-`client_app.train` with a real `Context` (per-client state, attacks, client-side DP). It needs no network.
+`client_app.train` with a real `Context` (per-client state, attacks, client-side DP, reproducibility), config validation
+and the helper scripts. It needs no network.
 
 ## Notes on where this differs from Flower
 - **FedOpt**: following Reddi et al., the second moment starts at `τ²` and there is no Adam bias correction
