@@ -1,0 +1,218 @@
+"""client_app.train/evaluate driven directly with a real Context, real model and synthetic data."""
+
+import tomllib
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+from flwr.app import ArrayRecord, ConfigRecord, Context, Message, MessageType, RecordDict
+
+from defai import client_app
+from defai.aggregation import l2_norm
+from defai.records import (
+    KEY_C,
+    KEY_C_DELTA,
+    STATE_MOON_PREVIOUS,
+    STATE_SCAFFOLD_C,
+    to_arrays,
+    to_record,
+)
+from defai.task import build_model, load_client_data
+
+PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+NUM_PARTITIONS = 4
+LR = 0.05
+
+
+def config(**overrides):
+    cfg = tomllib.loads(PYPROJECT.read_text())["tool"]["flwr"]["app"]["config"]
+    return {**cfg, "dataset": "synthetic", "batch-size": 64, **overrides}
+
+
+def global_model_record():
+    torch.manual_seed(123)
+    return ArrayRecord(build_model("synthetic").state_dict())
+
+
+GLOBAL = global_model_record()
+
+
+def train_message(round_config=None, **records):
+    content = {"arrays": GLOBAL, "config": ConfigRecord({"lr": LR, "server-round": 1, **(round_config or {})}), **records}
+    return Message(content=RecordDict(content), message_type=MessageType.TRAIN, dst_node_id=1)
+
+
+def context(cfg, partition_id=0, state=None):
+    return Context(
+        run_id=1,
+        node_id=partition_id + 1,
+        node_config={"partition-id": partition_id, "num-partitions": NUM_PARTITIONS},
+        state=state if state is not None else RecordDict(),
+        run_config=cfg,
+    )
+
+
+def run_train(cfg, round_config=None, partition_id=0, ctx=None, **records):
+    torch.manual_seed(0)  # DataLoader shuffling
+    ctx = ctx or context(cfg, partition_id)
+    reply = client_app.train(train_message(round_config, **records), ctx)
+    return reply, ctx
+
+
+def update_of(reply):
+    glob = to_arrays(GLOBAL)
+    local = to_arrays(reply.content["arrays"])
+    return {k: local[k] - glob[k] for k in glob}
+
+
+def test_reply_structure_and_metrics():
+    reply, _ = run_train(config())
+    assert list(reply.content["arrays"].keys()) == list(GLOBAL.keys())
+    metrics = reply.content["metrics"]
+    assert metrics["num-examples"] > 0 and np.isfinite(metrics["train_loss"])
+    assert set(metrics) == {"train_loss", "num-examples"}  # nothing algorithm-specific leaks in
+    assert l2_norm(update_of(reply)) > 0
+
+
+def test_training_is_deterministic_given_the_torch_seed():
+    a, _ = run_train(config())
+    b, _ = run_train(config())
+    for k, v in to_arrays(a.content["arrays"]).items():
+        np.testing.assert_array_equal(v, to_arrays(b.content["arrays"])[k])
+
+
+def test_fedprox_term_shrinks_the_local_update():
+    free = l2_norm(update_of(run_train(config())[0]))
+    prox = l2_norm(update_of(run_train(config(), {"proximal-mu": 2.0})[0]))
+    assert prox < free
+
+
+# --------------------------------------------------------------------------- SCAFFOLD
+def zero_control_variate():
+    return to_record({k: np.zeros_like(v) for k, v in to_arrays(GLOBAL).items()})
+
+
+def test_scaffold_first_round_returns_control_variate_from_the_formula_and_stores_it():
+    cfg = config()
+    reply, ctx = run_train(cfg, **{KEY_C: zero_control_variate()})
+    trainloader, _ = load_client_data(0, NUM_PARTITIONS, cfg)
+    steps = len(trainloader) * cfg["local-epochs"]
+    # c = c_i = 0  ->  c_i^+ = (x - y) / (K * lr), and dc = c_i^+
+    expected = {k: -v / (steps * LR) for k, v in update_of(reply).items()}
+    delta_c = to_arrays(reply.content[KEY_C_DELTA])
+    stored = to_arrays(ctx.state[STATE_SCAFFOLD_C])
+    assert list(delta_c) == [n for n, _ in build_model("synthetic").named_parameters()]
+    for k in delta_c:
+        np.testing.assert_allclose(delta_c[k], expected[k], rtol=1e-3, atol=1e-6)
+        np.testing.assert_allclose(stored[k], delta_c[k])
+    assert reply.content["metrics"]["scaffold-c-norm"] == pytest.approx(l2_norm(stored))
+
+
+def test_scaffold_state_persists_and_changes_the_next_round():
+    cfg = config()
+    first, ctx = run_train(cfg, **{KEY_C: zero_control_variate()})
+    after_first = to_arrays(ctx.state[STATE_SCAFFOLD_C])
+    again, _ = run_train(cfg, ctx=ctx, **{KEY_C: zero_control_variate()})  # same context -> c_i is remembered
+    fresh, _ = run_train(cfg, **{KEY_C: zero_control_variate()})           # new client, no state
+    first_u, again_u, fresh_u = (update_of(r) for r in (first, again, fresh))
+    for k in first_u:  # a client without state reproduces round 1 exactly
+        np.testing.assert_array_equal(first_u[k], fresh_u[k])
+    assert any(not np.allclose(first_u[k], again_u[k]) for k in first_u)  # the remembered c_i corrected the gradients
+    after_second = to_arrays(ctx.state[STATE_SCAFFOLD_C])
+    assert any(not np.allclose(after_first[k], after_second[k]) for k in after_first)  # and was updated again
+
+
+# ------------------------------------------------------------------------------- MOON
+MOON = {"moon-mu": 5.0, "moon-temperature": 0.5}
+
+
+def test_moon_first_participation_equals_plain_training_then_state_is_kept():
+    cfg = config()
+    plain = update_of(run_train(cfg)[0])
+    first, ctx = run_train(cfg, MOON)
+    for k, v in update_of(first).items():
+        np.testing.assert_allclose(v, plain[k], atol=2e-4)
+    assert STATE_MOON_PREVIOUS in ctx.state
+    saved = to_arrays(ctx.state[STATE_MOON_PREVIOUS])
+    for k, v in to_arrays(first.content["arrays"]).items():
+        np.testing.assert_allclose(saved[k], v, atol=1e-6)  # the previous local model is this round's result
+
+    second, _ = run_train(cfg, MOON, ctx=ctx)  # now z_prev != z_global
+    assert any(not np.allclose(v, plain[k], atol=1e-3) for k, v in update_of(second).items())
+
+
+# ----------------------------------------------------------------------------- attacks
+def attacked(attack, partition_id=0, **extra):
+    cfg = config(attack=attack, **{"num-malicious": 1, **extra})
+    return run_train(cfg, partition_id=partition_id)[0]
+
+
+def test_sign_flip_negates_the_honest_update():
+    honest = update_of(run_train(config())[0])
+    flipped = update_of(attacked("sign-flip", **{"attack-scale": 2.0}))
+    for k in honest:
+        np.testing.assert_allclose(flipped[k], -2.0 * honest[k], atol=1e-6)
+
+
+def test_gaussian_attack_sends_noise_of_the_requested_scale():
+    update = update_of(attacked("gaussian", **{"attack-scale": 0.5}))
+    flat = np.concatenate([v.ravel() for v in update.values()])
+    assert flat.std() == pytest.approx(0.5, rel=0.02) and abs(flat.mean()) < 0.01
+
+
+def test_label_flip_changes_what_is_learned():
+    honest = update_of(run_train(config())[0])
+    flipped = update_of(attacked("label-flip"))
+    assert any(not np.allclose(honest[k], flipped[k], atol=1e-4) for k in honest)
+
+
+@pytest.mark.parametrize("attack", ["label-flip", "sign-flip", "gaussian"])
+def test_only_the_first_num_malicious_partitions_misbehave(attack):
+    honest = update_of(run_train(config(), partition_id=1)[0])
+    same = update_of(attacked(attack, partition_id=1))  # partition 1 >= num-malicious (1)
+    for k in honest:
+        np.testing.assert_array_equal(honest[k], same[k])
+
+
+def test_num_malicious_zero_disables_the_attack():
+    honest = update_of(run_train(config())[0])
+    same = update_of(run_train(config(attack="sign-flip", **{"num-malicious": 0}))[0])
+    for k in honest:
+        np.testing.assert_array_equal(honest[k], same[k])
+
+
+# ------------------------------------------------------------------------ client-side DP
+def test_client_side_clipping_bounds_the_update_and_reports_the_bit():
+    clipped, _ = run_train(config(), {"dp-clip-norm": 0.01, "dp-adaptive": True})
+    assert l2_norm(update_of(clipped)) == pytest.approx(0.01, rel=1e-3)
+    assert clipped.content["metrics"]["dp-unclipped-bit"] == 0
+
+    loose, _ = run_train(config(), {"dp-clip-norm": 1e6, "dp-adaptive": True})
+    unclipped = update_of(run_train(config())[0])
+    assert loose.content["metrics"]["dp-unclipped-bit"] == 1
+    for k, v in update_of(loose).items():
+        np.testing.assert_allclose(v, unclipped[k], atol=1e-6)
+
+
+def test_fixed_clipping_does_not_report_a_bit():
+    reply, _ = run_train(config(), {"dp-clip-norm": 0.01, "dp-adaptive": False})
+    assert "dp-unclipped-bit" not in reply.content["metrics"]
+
+
+def test_attack_is_applied_before_clipping_so_dp_bounds_it():
+    cfg = config(attack="sign-flip", **{"num-malicious": 1, "attack-scale": 100.0})
+    reply, _ = run_train(cfg, {"dp-clip-norm": 0.5, "dp-adaptive": False})
+    assert l2_norm(update_of(reply)) <= 0.5 * (1 + 1e-4)
+
+
+# -------------------------------------------------------------------------------- evaluate
+def test_evaluate_returns_loss_and_accuracy():
+    msg = Message(
+        content=RecordDict({"arrays": GLOBAL, "config": ConfigRecord({"server-round": 1})}),
+        message_type=MessageType.EVALUATE,
+        dst_node_id=1,
+    )
+    reply = client_app.evaluate(msg, context(config()))
+    metrics = reply.content["metrics"]
+    assert 0.0 <= metrics["eval_acc"] <= 1.0 and metrics["eval_loss"] > 0 and metrics["num-examples"] > 0

@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 plot = ["matplotlib"]
+test = ["pytest", "dp-accounting"]  # dp-accounting only cross-checks the RDP accountant
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
@@ -34,12 +35,13 @@ clientapp = "defai.client_app:app"
 [tool.flwr.app.config]
 # federation
 num-server-rounds = 10
-strategy = "fedavg"         # fedavg | fedprox
-proximal-mu = 0.01          # FedProx only
+# fedavg | fedprox | moon | scaffold | fedavgm | fedadagrad | fedadam | fedyogi
+# | fedmedian | fedtrimmedavg | krum | multikrum
+strategy = "fedavg"
 fraction-train = 0.5        # fraction of SuperNodes sampled per round
 fraction-evaluate = 0.5
 # data
-dataset = "mnist"           # mnist | cifar10
+dataset = "mnist"           # mnist | cifar10 | synthetic (offline, for smoke tests)
 partitioner = "iid"         # iid | dirichlet
 dirichlet-alpha = 0.5       # smaller = more non-IID
 seed = 42
@@ -47,6 +49,38 @@ seed = 42
 local-epochs = 1
 batch-size = 32
 learning-rate = 0.01
+# non-IID algorithms
+proximal-mu = 0.01          # fedprox: weight of the proximal term
+moon-mu = 1.0               # moon: weight of the contrastive loss
+moon-temperature = 0.5      # moon: softmax temperature
+# server optimisation
+server-learning-rate = 1.0  # fedavg / fedprox / moon / scaffold / robust rules: scales the aggregated update
+server-momentum = 0.9       # fedavgm
+fedopt-learning-rate = 0.01 # fedadagrad / fedadam / fedyogi: server step size (eta)
+beta-1 = 0.9                # fedopt first-moment decay
+beta-2 = 0.99               # fedopt second-moment decay (fedadam / fedyogi)
+tau = 1e-3                  # fedopt adaptivity
+# robust aggregation
+trim-ratio = 0.2            # fedtrimmedavg: fraction trimmed from each side
+num-byzantine = 1           # krum / multikrum: assumed number f of malicious clients per round
+multikrum-select = 3        # multikrum: number of updates averaged
+# malicious-client simulation (clients with partition-id < num-malicious misbehave)
+attack = "none"             # none | label-flip | sign-flip | gaussian
+num-malicious = 0
+attack-scale = 1.0          # sign-flip: multiplier; gaussian: std of the replacement update
+# differential privacy (mean-based strategies only)
+dp = "none"                 # none | fixed | adaptive
+dp-side = "server"          # server: server clips | client: clients clip (server still enforces the bound)
+dp-noise-multiplier = 1.0   # z: noise std = z * clip-norm / clients-per-round
+dp-clip-norm = 1.0          # C (initial value for adaptive clipping)
+dp-delta = 1e-5
+dp-max-epsilon = 0.0        # stop training before epsilon would exceed this (0 = no limit)
+dp-target-quantile = 0.5    # adaptive: fraction of updates that should be unclipped
+dp-clip-lr = 0.2            # adaptive: learning rate of the clip-norm update
+dp-clipped-count-stddev = 0.0  # adaptive: noise std on the clipped count (0 = clients-per-round / 20)
 # output
 output-dir = "results"
 save-model = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

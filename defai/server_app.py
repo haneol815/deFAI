@@ -7,24 +7,20 @@ import time
 import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
-from flwr.serverapp.strategy import FedAvg, FedProx
 
+from defai.strategies import build_strategy
 from defai.task import build_model, get_device, load_centralized_testset, test
 
 app = ServerApp()
 
 
-def build_strategy(cfg):
-    common = dict(
-        fraction_train=cfg["fraction-train"],
-        fraction_evaluate=cfg["fraction-evaluate"],
-    )
-    if cfg["strategy"] == "fedavg":
-        return FedAvg(**common)
-    if cfg["strategy"] == "fedprox":
-        return FedProx(**common, proximal_mu=cfg["proximal-mu"])
-    # Add your own strategy here (e.g. subclass FedAvg and override aggregate_train)
-    raise ValueError(f"unknown strategy: {cfg['strategy']}")
+def _run_name(cfg):
+    name = f"{cfg['dataset']}_{cfg['strategy']}_{cfg['partitioner']}"
+    if cfg["dp"] != "none":
+        name += f"_dp-{cfg['dp']}-{cfg['dp-side']}"
+    if cfg["attack"] != "none" and cfg["num-malicious"] > 0:
+        name += f"_{cfg['attack']}x{cfg['num-malicious']}"
+    return f"{name}_{time.strftime('%Y%m%d-%H%M%S')}"
 
 
 @app.main()
@@ -40,7 +36,8 @@ def main(grid: Grid, context: Context) -> None:
         loss, acc = test(model, testloader, device)
         return MetricRecord({"test_loss": loss, "test_acc": acc})
 
-    result = build_strategy(cfg).start(
+    strategy = build_strategy(cfg)
+    result = strategy.start(
         grid=grid,
         initial_arrays=ArrayRecord(model.state_dict()),
         train_config=ConfigRecord({"lr": cfg["learning-rate"]}),
@@ -48,8 +45,7 @@ def main(grid: Grid, context: Context) -> None:
         evaluate_fn=global_evaluate,
     )
 
-    run_name = f"{cfg['dataset']}_{cfg['strategy']}_{cfg['partitioner']}_{time.strftime('%Y%m%d-%H%M%S')}"
-    out_dir = os.path.join(cfg["output-dir"], run_name)
+    out_dir = os.path.join(cfg["output-dir"], _run_name(cfg))
     os.makedirs(out_dir, exist_ok=True)
 
     history = []
@@ -58,8 +54,17 @@ def main(grid: Grid, context: Context) -> None:
         row.update(result.train_metrics_clientapp.get(r, {}))
         row.update(result.evaluate_metrics_clientapp.get(r, {}))
         history.append(row)
+    summary = {"config": dict(cfg), "history": history}
+    if strategy.dp is not None:
+        summary["privacy"] = {
+            "mechanism": strategy.dp.describe(),
+            "epsilon": strategy.dp.epsilon,
+            "delta": strategy.dp.delta,
+            "rounds_accounted": strategy.dp.accountant.num_releases,
+        }
+        print(f"\nPrivacy spent: epsilon={strategy.dp.epsilon:.4f} at delta={strategy.dp.delta:g}")
     with open(os.path.join(out_dir, "history.json"), "w") as f:
-        json.dump({"config": dict(cfg), "history": history}, f, indent=2)
+        json.dump(summary, f, indent=2)
 
     if cfg["save-model"]:
         torch.save(result.arrays.to_torch_state_dict(), os.path.join(out_dir, "final_model.pt"))
