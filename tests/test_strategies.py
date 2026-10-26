@@ -1,6 +1,9 @@
 import numpy as np
 import pytest
+from flwr.app import Message, MetricRecord, RecordDict
+
 from defai.privacy.dp import FixedClipping
+from defai.records import to_record
 from defai.strategies import (
     Bulyan,
     FedAdagrad,
@@ -305,3 +308,48 @@ def test_aggregation_order_does_not_depend_on_reply_arrival_order():
         strategy.aggregate_train(1, list(replies))
     assert seen[0] == grid.nodes  # registration order, not id order and not arrival order
     assert all(order == seen[0] for order in seen)
+
+
+# --------------------------------------------------------------------- malformed replies
+class _Corrupt(QuadraticClients):
+    """Node 1 sends the given value in place of its model (and node 2 an infinite weight if asked)."""
+
+    def __init__(self, targets, value=np.nan, weight=None, **kw):
+        super().__init__(targets, **kw)
+        self.value, self.weight = value, weight
+
+    def __call__(self, msg):
+        reply = super().__call__(msg)
+        node = msg.metadata.dst_node_id
+        if "arrays" not in reply.content:
+            return reply
+        content = dict(reply.content)
+        if node == 1 and self.weight is None:
+            content["arrays"] = to_record({"w": np.full(DIM, self.value, dtype=np.float32)})
+        if node == 1 and self.weight is not None:
+            content["metrics"] = MetricRecord({**dict(reply.content["metrics"]), "num-examples": self.weight})
+        return Message(content=RecordDict(content), reply_to=msg)
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf, -np.inf])
+@pytest.mark.parametrize("make", [
+    lambda: FedAvg(**COMMON),
+    lambda: FedAvg(dp=FixedClipping(1.0, 1.0, seed=0), **COMMON),
+    lambda: FedMedian(**COMMON),
+], ids=["fedavg", "fedavg+dp", "fedmedian"])
+def test_replies_with_non_finite_parameters_are_dropped(make, value, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="flwr"):
+        w, _, _ = run_strategy(make(), _Corrupt(TARGETS, value=value), N, 3, DIM)
+    assert np.all(np.isfinite(w))
+    assert "non-finite values" in caplog.text
+
+
+@pytest.mark.parametrize("weight", [float("inf"), float("nan"), 0, -3])
+def test_replies_with_unusable_weights_are_dropped(weight, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="flwr"):
+        w, _, _ = run_strategy(FedAvg(**COMMON), _Corrupt(TARGETS, weight=weight), N, 2, DIM)
+    assert np.all(np.isfinite(w)) and "positive finite number" in caplog.text
