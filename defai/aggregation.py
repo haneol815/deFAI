@@ -32,9 +32,17 @@ def _stack(updates: Sequence[Arrays], key: str) -> np.ndarray:
     return np.stack([u[key] for u in updates]).astype(np.float64)
 
 
+def cast_like(values: np.ndarray, dtype) -> np.ndarray:
+    """Cast float64 results back to ``dtype``; integers are rounded, not truncated."""
+    values = np.asarray(values)
+    if np.issubdtype(dtype, np.integer):
+        values = np.rint(values)
+    return values.astype(dtype, copy=False)
+
+
 def _like(result: np.ndarray, reference: np.ndarray) -> np.ndarray:
     """Cast an aggregate back to the dtype of the arrays it was computed from."""
-    return np.asarray(result).astype(reference.dtype, copy=False)
+    return cast_like(result, reference.dtype)
 
 
 def weighted_mean(updates: Sequence[Arrays], weights: Sequence[float]) -> Arrays:

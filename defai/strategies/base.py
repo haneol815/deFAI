@@ -34,7 +34,7 @@ from flwr.serverapp import Grid
 from flwr.serverapp.strategy import Strategy
 from flwr.supercore import log
 
-from defai.aggregation import Arrays, weighted_mean
+from defai.aggregation import Arrays, cast_like, weighted_mean
 from defai.privacy.dp import KEY_UNCLIPPED_BIT
 from defai.records import to_arrays, to_record
 
@@ -274,7 +274,7 @@ class FedAvg(Strategy):
     def _step(self, scale: float, delta: Arrays) -> Arrays:
         """global + scale * delta, in the dtype of the global model."""
         return {
-            k: (g.astype(np.float64) + scale * delta[k]).astype(g.dtype) for k, g in self._global.items()
+            k: cast_like(g.astype(np.float64) + scale * delta[k], g.dtype) for k, g in self._global.items()
         }
 
     def aggregate_train(

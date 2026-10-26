@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from flwr.app import Message, MetricRecord, RecordDict
 
+from conftest import FakeGrid
 from defai.privacy.dp import FixedClipping
 from defai.records import to_record
 from defai.strategies import (
@@ -353,3 +354,29 @@ def test_replies_with_unusable_weights_are_dropped(weight, caplog):
     with caplog.at_level(logging.WARNING, logger="flwr"):
         w, _, _ = run_strategy(FedAvg(**COMMON), _Corrupt(TARGETS, weight=weight), N, 2, DIM)
     assert np.all(np.isfinite(w)) and "positive finite number" in caplog.text
+
+
+def test_integer_parameters_do_not_drift_by_one_when_all_clients_agree():
+    """Regression: float64 round-off (257.99999...) used to be truncated to 257 in the global model."""
+    from flwr.app import ConfigRecord
+
+    rng = np.random.default_rng(0)
+    strategy = FedAvg(**COMMON)
+    start = {"w": np.zeros(DIM, np.float32), "steps": np.array([979], dtype=np.int64)}
+    grid = FakeGrid(6, lambda m: None)
+    for trial in range(60):  # different sample orders / weights hit different round-off
+        messages = list(strategy.configure_train(1, to_record(start), ConfigRecord({"lr": 0.1}), grid))
+        weights = rng.integers(1, 500, size=len(messages))
+        replies = [
+            Message(
+                content=RecordDict({
+                    "arrays": to_record({"w": np.ones(DIM, np.float32), "steps": np.array([258], dtype=np.int64)}),
+                    "metrics": MetricRecord({"num-examples": int(w)}),
+                }),
+                reply_to=m,
+            )
+            for m, w in zip(messages, weights)
+        ]
+        arrays, _ = strategy.aggregate_train(1, replies)
+        steps = arrays["steps"].numpy()
+        assert steps.dtype == np.int64 and steps[0] == 258, (trial, steps)
