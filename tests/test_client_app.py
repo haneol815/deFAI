@@ -75,11 +75,20 @@ def test_reply_structure_and_metrics():
     assert l2_norm(update_of(reply)) > 0
 
 
-def test_training_is_deterministic_given_the_torch_seed():
-    a, _ = run_train(config())
-    b, _ = run_train(config())
-    for k, v in to_arrays(a.content["arrays"]).items():
-        np.testing.assert_array_equal(v, to_arrays(b.content["arrays"])[k])
+def test_local_training_is_reproducible_whatever_the_global_torch_state():
+    """Data order is seeded from (seed, partition, round), so the worker's RNG state is irrelevant."""
+    def update(torch_seed, **kw):
+        torch.manual_seed(torch_seed)
+        ctx = context(config(**kw.pop("cfg", {})), kw.pop("partition", 0))
+        msg = train_message({"server-round": kw.pop("round", 1)})
+        return update_of(client_app.train(msg, ctx))
+
+    a, b = update(0), update(12345)
+    for k in a:
+        np.testing.assert_array_equal(a[k], b[k])
+    other_round, other_partition, other_seed = update(0, round=2), update(0, partition=1), update(0, cfg={"seed": 7})
+    for other in (other_round, other_partition, other_seed):
+        assert any(not np.allclose(a[k], other[k]) for k in a)
 
 
 def test_fedprox_term_shrinks_the_local_update():
