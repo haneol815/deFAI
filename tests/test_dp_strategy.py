@@ -130,3 +130,21 @@ def test_missing_replies_keep_the_fixed_denominator():
     arrays, _ = strategy.aggregate_train(1, [clients(m) for m in answered])
     expected = np.sum([0.5 * TARGETS[m.metadata.dst_node_id] for m in answered], axis=0) / N
     np.testing.assert_allclose(arrays["w"].numpy(), expected, atol=1e-5)
+
+
+def test_adaptive_clipping_with_default_settings_works_for_a_small_federation():
+    """Regression: z=1 with 5 clients per round used to crash in round 1 (needs z < m / 10)."""
+    dp = AdaptiveClipping(1.0, clip_norm=1.0, seed=0)
+    strategy = FedAvg(dp=dp, **{**COMMON, "fraction_train": 0.5})
+    _, result, _ = run_strategy(strategy, QuadraticClients(TARGETS), N, rounds=2, dim=DIM)
+    assert "dp-epsilon" in result.train_metrics_clientapp[2]
+
+
+def test_infeasible_adaptive_settings_fail_before_any_client_trains():
+    dp = AdaptiveClipping(1.0, clip_norm=1.0, clipped_count_stddev=0.25)
+    strategy = FedAvg(dp=dp, **COMMON)
+    clients = QuadraticClients(TARGETS)
+    grid = FakeGrid(N, clients)
+    with pytest.raises(ValueError, match="dp-clipped-count-stddev"):
+        strategy.configure_train(1, to_record({"w": np.zeros(DIM, np.float32)}), ConfigRecord({"lr": 0.1}), grid)
+    assert grid.sent == []

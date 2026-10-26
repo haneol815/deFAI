@@ -77,7 +77,7 @@ dp-delta = 1e-5
 dp-max-epsilon = 0.0        # stop training before epsilon would exceed this (0 = no limit)
 dp-target-quantile = 0.5    # adaptive: fraction of updates that should be unclipped
 dp-clip-lr = 0.2            # adaptive: learning rate of the clip-norm update
-dp-clipped-count-stddev = 0.0  # adaptive: noise std on the clipped count (0 = clients-per-round / 20)
+dp-clipped-count-stddev = 0.0  # adaptive: noise std on the clipped count (0 = max(clients-per-round / 20, dp-noise-multiplier))
 # output
 output-dir = "results"
 save-model = false

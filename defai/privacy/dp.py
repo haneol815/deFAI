@@ -60,8 +60,9 @@ def adaptive_noise_multiplier(noise_multiplier: float, bit_noise_std: float) -> 
         return 0.0
     if noise_multiplier >= 2 * bit_noise_std:
         raise ValueError(
-            f"clipped-count noise std ({bit_noise_std}) is too small for noise multiplier "
-            f"{noise_multiplier}: need noise_multiplier < 2 * clipped_count_stddev"
+            f"clipped-count noise std ({bit_noise_std:g}) is too small for noise multiplier "
+            f"{noise_multiplier:g}: need noise_multiplier < 2 * clipped_count_stddev "
+            f"(run-config: raise 'dp-clipped-count-stddev' or lower 'dp-noise-multiplier')"
         )
     return float((noise_multiplier**-2 - (2 * bit_noise_std) ** -2) ** -0.5)
 
@@ -107,6 +108,10 @@ class _GaussianDP:
         if self.side != "client":
             return {}
         return {KEY_CLIP_NORM: self.clip_norm, KEY_ADAPTIVE: self.adaptive}
+
+    def begin_round(self, num_sampled: int) -> None:
+        """Check the settings for a round with ``num_sampled`` clients, before any client trains."""
+        self._update_noise_multiplier(num_sampled)  # raises for infeasible settings
 
     def budget_exhausted(self) -> bool:
         """True if one more round would exceed ``max_epsilon``."""
@@ -204,8 +209,11 @@ class AdaptiveClipping(_GaussianDP):
     def _bit_std(self, num_sampled: int) -> float:
         if self.clipped_count_stddev is not None:
             return self.clipped_count_stddev
-        # Andrew et al. recommend m / 20 (no count noise when the update is not noised).
-        return num_sampled / 20 if self.noise_multiplier > 0 else 0.0
+        if self.noise_multiplier <= 0:
+            return 0.0  # the update is not noised, so neither is the count
+        # Andrew et al. recommend m / 20. That is infeasible for small federations (it needs
+        # noise_multiplier < m / 10), so never go below the noise multiplier itself.
+        return max(num_sampled / 20, self.noise_multiplier)
 
     def _update_noise_multiplier(self, num_sampled: int) -> float:
         return adaptive_noise_multiplier(self.noise_multiplier, self._bit_std(num_sampled))
