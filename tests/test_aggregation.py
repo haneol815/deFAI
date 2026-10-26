@@ -75,3 +75,39 @@ def test_krum_and_multikrum_pick_honest_clients():
 def test_krum_single_client_and_oversized_select():
     assert multi_krum_select([U(1)], 0, 3) == [0]
     assert sorted(multi_krum_select([U(0), U(1), U(2)], 0, 10)) == [0, 1, 2]
+
+
+# ------------------------------------------------------------------------------ Bulyan
+from defai.aggregation import bulyan_select, closest_to_median_mean  # noqa: E402
+
+
+def test_closest_to_median_mean_hand_computed():
+    updates = [U(0), U(1), U(2), U(3), U(100)]  # median 2
+    np.testing.assert_allclose(closest_to_median_mean(updates, 3)["w"], [2.0])  # {2, 1, 3}
+    np.testing.assert_allclose(closest_to_median_mean(updates, 1)["w"], [2.0])
+    np.testing.assert_allclose(closest_to_median_mean(updates, 5)["w"], [106 / 5])  # all values
+    with pytest.raises(ValueError):
+        closest_to_median_mean(updates, 0)
+    with pytest.raises(ValueError):
+        closest_to_median_mean(updates, 6)
+
+
+def test_closest_to_median_mean_acts_per_coordinate():
+    updates = [{"w": np.array([0.0, 10.0])}, {"w": np.array([1.0, 11.0])}, {"w": np.array([2.0, 12.0])}, {"w": np.array([50.0, -50.0])}]
+    # coordinate medians are 1.5 and 10.5; per coordinate the two closest values are averaged:
+    # {1, 2} -> 1.5 and {10, 11} -> 10.5
+    np.testing.assert_allclose(closest_to_median_mean(updates, 2)["w"], [1.5, 10.5])
+
+
+def test_bulyan_select_is_iterated_krum_and_drops_the_outliers():
+    updates = _honest_and_byzantine(n_honest=9, n_byz=2)  # n=11 = 4f+3 with f=2
+    d = pairwise_sq_distances(updates)
+    chosen = bulyan_select(d, num_byzantine=2, num_select=7)  # theta = n - 2f
+    assert len(chosen) == len(set(chosen)) == 7 and all(i < 9 for i in chosen)
+    # the first pick is plain Krum
+    assert chosen[0] == multi_krum_select(updates, 2, 1)[0]
+
+
+def test_bulyan_select_handles_exhaustion():
+    d = pairwise_sq_distances([U(0), U(1), U(2)])
+    assert sorted(bulyan_select(d, 0, 10)) == [0, 1, 2]

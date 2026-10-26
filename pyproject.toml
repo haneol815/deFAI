@@ -36,7 +36,7 @@ clientapp = "defai.client_app:app"
 # federation
 num-server-rounds = 10
 # fedavg | fedprox | moon | scaffold | fedavgm | fedadagrad | fedadam | fedyogi
-# | fedmedian | fedtrimmedavg | krum | multikrum
+# | fedmedian | fedtrimmedavg | krum | multikrum | bulyan
 strategy = "fedavg"
 fraction-train = 0.5        # fraction of SuperNodes sampled per round
 fraction-evaluate = 0.5
@@ -62,7 +62,7 @@ beta-2 = 0.99               # fedopt second-moment decay (fedadam / fedyogi)
 tau = 1e-3                  # fedopt adaptivity
 # robust aggregation
 trim-ratio = 0.2            # fedtrimmedavg: fraction trimmed from each side
-num-byzantine = 1           # krum / multikrum: assumed number f of malicious clients per round
+num-byzantine = 1           # krum / multikrum / bulyan: assumed number f of malicious clients per round (bulyan needs 4f+3 replies)
 multikrum-select = 3        # multikrum: number of updates averaged
 # malicious-client simulation (clients with partition-id < num-malicious misbehave)
 attack = "none"             # none | label-flip | sign-flip | gaussian

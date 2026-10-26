@@ -1,9 +1,11 @@
-"""Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum and Multi-Krum.
+"""Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum, Multi-Krum and Bulyan.
 
 * FedMedian / FedTrimmedAvg: Yin et al., "Byzantine-Robust Distributed Learning:
   Towards Optimal Statistical Rates", ICML 2018.
 * Krum / Multi-Krum: Blanchard et al., "Machine Learning with Adversaries:
   Byzantine Tolerant Gradient Descent", NeurIPS 2017.
+* Bulyan: El Mhamdi et al., "The Hidden Vulnerability of Distributed Learning in
+  Byzantium", ICML 2018.
 
 All rules operate on client *updates*, which gives the same result as operating on
 the client models (the global model is a common shift) and lets us reuse the
@@ -15,7 +17,16 @@ from logging import INFO, WARNING
 
 from flwr.supercore import log
 
-from defai.aggregation import Arrays, coordinate_median, multi_krum_select, trimmed_mean, weighted_mean
+from defai.aggregation import (
+    Arrays,
+    bulyan_select,
+    closest_to_median_mean,
+    coordinate_median,
+    multi_krum_select,
+    pairwise_sq_distances,
+    trimmed_mean,
+    weighted_mean,
+)
 from defai.strategies.base import ClientUpdate, FedAvg
 
 
@@ -90,3 +101,45 @@ class Krum(MultiKrum):
 
     def __init__(self, *, num_byzantine: int = 1, **kwargs) -> None:
         super().__init__(num_byzantine=num_byzantine, num_select=1, **kwargs)
+
+
+class Bulyan(FedAvg):
+    """Krum selection followed by a coordinate-wise trimmed aggregation.
+
+    With ``n`` replies and ``f`` = ``num_byzantine``: Krum is applied repeatedly to pick
+    ``theta = n - 2f`` updates (the paper's recursive selection, not Flower's one-shot
+    Multi-Krum), then every coordinate is the mean of the ``beta = theta - 2f`` selected
+    values closest to the coordinate-wise median. The guarantee needs ``n >= 4f + 3``;
+    with fewer replies ``f`` is lowered to ``(n - 3) // 4`` (down to a plain mean) and a
+    warning is logged. Training metrics are aggregated over the selected clients only.
+    """
+
+    name = "bulyan"
+    supports_dp = False
+
+    def __init__(self, *, num_byzantine: int = 1, **kwargs) -> None:
+        super().__init__(**kwargs)
+        if num_byzantine < 0:
+            raise ValueError("num_byzantine must be >= 0")
+        self.num_byzantine = num_byzantine
+        self._effective_f = num_byzantine
+
+    def select_updates(self, updates: list[ClientUpdate]) -> list[ClientUpdate]:
+        n, f = len(updates), self.num_byzantine
+        self._effective_f = f
+        if n < 4 * f + 3:
+            self._effective_f = max(0, (n - 3) // 4)
+            log(WARNING, "\tBulyan: %d replies < 4f+3 = %d; using f=%d, the robustness guarantee does not hold",
+                n, 4 * f + 3, self._effective_f)
+        theta = n - 2 * self._effective_f
+        chosen = bulyan_select(pairwise_sq_distances([u.delta for u in updates]), self._effective_f, theta)
+        log(INFO, "\tBulyan selected nodes %s", [updates[i].node_id for i in chosen])
+        return [updates[i] for i in chosen]
+
+    def aggregate_updates(self, updates: list[ClientUpdate]) -> Arrays:
+        beta = max(1, len(updates) - 2 * self._effective_f)
+        return closest_to_median_mean([u.delta for u in updates], beta)
+
+    def summary(self) -> None:
+        super().summary()
+        log(INFO, "\t└──> Bulyan: f=%d (needs >= %d replies per round)", self.num_byzantine, 4 * self.num_byzantine + 3)
