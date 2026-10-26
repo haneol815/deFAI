@@ -7,7 +7,7 @@ from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 
 from defai.config import validate_config
-from defai.results import build_history, privacy_summary, run_name, write_summary
+from defai.results import build_history, final_arrays, privacy_summary, run_name, write_summary
 from defai.strategies import build_strategy
 from defai.task import build_model, get_device, load_centralized_testset, test
 
@@ -29,9 +29,10 @@ def main(grid: Grid, context: Context) -> None:
         return MetricRecord({"test_loss": loss, "test_acc": acc})
 
     strategy = build_strategy(cfg)
+    initial_arrays = ArrayRecord(model.state_dict())
     result = strategy.start(
         grid=grid,
-        initial_arrays=ArrayRecord(model.state_dict()),
+        initial_arrays=initial_arrays,
         train_config=ConfigRecord({"lr": cfg["learning-rate"]}),
         num_rounds=cfg["num-server-rounds"],
         evaluate_fn=global_evaluate,
@@ -47,5 +48,5 @@ def main(grid: Grid, context: Context) -> None:
     write_summary(os.path.join(out_dir, "history.json"), summary)
 
     if cfg["save-model"]:
-        torch.save(result.arrays.to_torch_state_dict(), os.path.join(out_dir, "final_model.pt"))
+        torch.save(final_arrays(result, initial_arrays).to_torch_state_dict(), os.path.join(out_dir, "final_model.pt"))
     print(f"\nSaved results to {os.path.abspath(out_dir)}")
