@@ -185,3 +185,12 @@ def test_a_client_cannot_steer_the_clip_norm_with_a_malformed_bit(bad_bit, caplo
     assert "unclipped-bit" in caplog.text
     assert 0.1 < dp.clip_norm < 10 and np.all(np.isfinite(w))  # only well-formed replies steer C
     assert dp.accountant.num_releases == 3
+
+
+def test_the_exact_clipped_count_of_client_reports_is_not_published():
+    dp = AdaptiveClipping(0.5, clip_norm=1.0, side="client", seed=0)
+    strategy = FedAvg(dp=dp, **COMMON)
+    _, result, _ = run_strategy(strategy, _BitClients(TARGETS, bad_bit=1), N, 2, DIM)
+    for metrics in result.train_metrics_clientapp.values():
+        assert "dp-unclipped-bit" not in metrics and "dp-clipped-fraction" not in metrics
+        assert "dp-noisy-unclipped-fraction" in metrics

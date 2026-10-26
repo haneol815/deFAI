@@ -298,6 +298,8 @@ class FedAvg(Strategy):
 
         new_global = self.update_global(server_round, delta)
         metrics = weighted_metrics([u.metrics for u in updates], [u.weight for u in updates], self.weighted_by_key)
+        if self.dp is not None:
+            metrics.pop(KEY_UNCLIPPED_BIT, None)  # their exact mean is the clipped count the DP noise protects
         metrics.update(dp_metrics)
         return to_record(new_global), MetricRecord(metrics)
 
