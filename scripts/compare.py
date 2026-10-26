@@ -85,7 +85,7 @@ def summarise(paths, target):
         finals = [s["final"] for s, _ in runs]
         bests = [s["best"] for s, _ in runs]
         reached = [s["reached"] for s, _ in runs if s["reached"] is not None]
-        eps = [p["epsilon"] for _, p in runs if p]
+        eps = [float("inf") if p.get("epsilon_unbounded") else p["epsilon"] for _, p in runs if p]
         rows.append({
             "run": name,
             "runs": len(runs),

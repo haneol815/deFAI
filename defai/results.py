@@ -1,5 +1,7 @@
 """Run naming and result (history.json) construction for the ServerApp."""
 
+import json
+import math
 import time
 
 from flwr.serverapp.strategy import Result
@@ -24,3 +26,35 @@ def build_history(result: Result) -> list[dict]:
         row.update(result.evaluate_metrics_clientapp.get(r, {}))
         history.append(row)
     return history
+
+
+def jsonable(obj):
+    """Copy of ``obj`` with non-finite floats replaced by None, so the output is strict JSON.
+
+    Python's json writes ``Infinity``/``NaN``, which other parsers reject. A DP run with
+    noise multiplier 0 has an infinite epsilon, for example.
+    """
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    if isinstance(obj, dict):
+        return {k: jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [jsonable(v) for v in obj]
+    return obj
+
+
+def privacy_summary(dp) -> dict:
+    """Final privacy guarantee of a run. ``epsilon`` is null (and ``epsilon_unbounded`` true) when infinite."""
+    epsilon = dp.epsilon
+    return {
+        "mechanism": dp.describe(),
+        "epsilon": epsilon,
+        "epsilon_unbounded": not math.isfinite(epsilon),
+        "delta": dp.delta,
+        "rounds_accounted": dp.accountant.num_releases,
+    }
+
+
+def write_summary(path, summary: dict) -> None:
+    with open(path, "w") as f:
+        json.dump(jsonable(summary), f, indent=2, allow_nan=False)

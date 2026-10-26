@@ -79,3 +79,21 @@ def test_plot_script_accepts_any_history_key(tmp_path):
     finally:
         sys.argv = old
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_scripts_handle_null_epsilon_from_unbounded_runs(tmp_path):
+    compare, plot = load_script("compare"), load_script("plot")
+    path = write_run(tmp_path, "inf", [0.1, 0.5], dp="fixed", **{"dp-side": "server", "dp-noise-multiplier": 0.0},
+                     privacy={"epsilon": None, "epsilon_unbounded": True})
+    data = json.loads(Path(path).read_text())
+    data["history"][1]["dp-epsilon"] = None
+    Path(path).write_text(json.dumps(data))
+    assert compare.summarise([path], 0.9)[0]["epsilon"] == "inf"
+    pytest.importorskip("matplotlib")
+    import sys
+
+    old, sys.argv = sys.argv, ["plot.py", path, "-m", "dp-epsilon", "-o", str(tmp_path / "e.png")]
+    try:
+        plot.main()  # all values null -> an empty curve, not a crash
+    finally:
+        sys.argv = old
