@@ -10,7 +10,7 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 - Algorithms (all implemented in this repo against Flower's `Strategy` interface — see [Algorithms](#algorithms)):
   - non-IID: FedProx, SCAFFOLD, MOON
   - server optimisation: FedAvgM, FedAdagrad, FedAdam, FedYogi
-  - Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum, Multi-Krum
+  - Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum, Multi-Krum, Bulyan
   - central differential privacy: fixed / adaptive clipping, server- or client-side, with an RDP accountant
 - Malicious-client simulation: label flipping, sign flipping, Gaussian-noise updates
 - Evaluation: federated (on each client's local data) + centralized (on the full test set at the server)
@@ -23,20 +23,22 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 │   ├── server_app.py         # ServerApp: strategy selection, rounds, centralized eval, result saving
 │   ├── client_app.py         # ClientApp: local training / evaluation, per-client state, attacks, client-side DP
 │   ├── task.py               # Model, data partitioning/loading, local train/test (FedProx/SCAFFOLD/MOON hooks)
-│   ├── aggregation.py        # Pure-numpy rules: weighted mean, median, trimmed mean, Krum scores
+│   ├── config.py             # Run-config validation (fails fast on typos / out-of-range values)
+│   ├── aggregation.py        # Pure-numpy rules: weighted mean, median, trimmed mean, Krum, Bulyan
 │   ├── attacks.py            # Malicious-client behaviours
 │   ├── records.py            # ArrayRecord <-> numpy helpers, wire-format keys
 │   ├── strategies/
 │   │   ├── base.py           # FedAvg + the hooks every strategy plugs into
 │   │   ├── heterogeneity.py  # FedProx, MOON, SCAFFOLD
 │   │   ├── fedopt.py         # FedAvgM, FedAdagrad, FedAdam, FedYogi
-│   │   ├── robust.py         # FedMedian, FedTrimmedAvg, Krum, Multi-Krum
+│   │   ├── robust.py         # FedMedian, FedTrimmedAvg, Krum, Multi-Krum, Bulyan
 │   │   └── __init__.py       # registry + run-config -> strategy factory
 │   └── privacy/
 │       ├── dp.py             # Clipping + Gaussian noise (fixed / adaptive)
 │       └── accountant.py     # Renyi-DP accountant
 ├── tests/                    # pytest suite (no network or GPU needed)
 ├── scripts/plot.py           # Metric-per-round plotting
+├── scripts/compare.py        # Results table (mean ± std over seeds, rounds-to-target, epsilon)
 ├── docs/report.md            # Report template
 └── results/                  # Experiment outputs (git-ignored)
 ```
@@ -95,6 +97,7 @@ Select with `strategy='<name>'`. Every strategy is implemented in `defai/strateg
 | `fedmedian` | Coordinate-wise median | – | Yin et al., 2018 |
 | `fedtrimmedavg` | Coordinate-wise trimmed mean | `trim-ratio` | Yin et al., 2018 |
 | `krum` `multikrum` | Pick the update(s) closest to their neighbours | `num-byzantine`, `multikrum-select` | Blanchard et al., 2017 |
+| `bulyan` | Recursive Krum selection, then the values closest to the median | `num-byzantine` (needs `4f+3` replies) | El Mhamdi et al., 2018 |
 
 SCAFFOLD and MOON keep per-client state (the client's control variate / previous local model) in
 `context.state`, which the simulation engine preserves between rounds.
@@ -111,7 +114,12 @@ flwr run . --stream --federation-config "num-supernodes=10" --run-config \
   "strategy='krum' num-byzantine=2 fraction-train=1.0 attack='sign-flip' num-malicious=2 attack-scale=3.0"
 ```
 `attack` is `label-flip` (labels y → 9−y while training), `sign-flip` (sends `global − scale·update`) or `gaussian`
-(sends `global + N(0, scale²)`). Krum needs at least `2f+3` replies per round to be meaningful.
+(sends `global + N(0, scale²)`). Krum/Multi-Krum need at least `2f+3` replies per round and Bulyan `4f+3`; with fewer, they
+log a warning (Bulyan lowers its `f`) because the guarantee no longer holds. `fedtrimmedavg` warns when
+`trim-ratio × replies < 1`, i.e. when it would trim nothing.
+
+Whatever the strategy, a reply is dropped (with a warning) if its parameters contain NaN/inf or its `num-examples`
+is not a positive finite number — a single non-finite value would otherwise survive any averaging, clipping or noise.
 
 ### Differential privacy
 `dp='fixed'` or `dp='adaptive'` adds central DP to any mean-based strategy (`fedavg`, `fedprox`, `moon`, `fedavgm`,
@@ -164,6 +172,7 @@ exact Gaussian-mechanism δ(ε)), DP clipping/noise/adaptive-quantile convergenc
 - **DP position**: noise is added to the mean update before the server optimiser, not to the final model.
 - **Training loss** reported by clients excludes the FedProx / MOON regularisers so it is comparable across algorithms.
 - **Multi-Krum** averages the selected updates uniformly (as in the paper); Flower weights them by example count.
+- **Bulyan** selects with Krum applied recursively (as in the paper); Flower picks the `n−2f` selection with one Multi-Krum call.
 
 ## Extending
 - **New aggregation algorithm**: subclass `defai.strategies.base.FedAvg` and override one of `select_updates`,
