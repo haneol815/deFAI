@@ -21,6 +21,7 @@ McMahan et al., "Communication-Efficient Learning of Deep Networks from Decentra
 Data", AISTATS 2017.
 """
 
+import math
 import random
 import time
 from collections.abc import Iterable
@@ -205,8 +206,8 @@ class FedAvg(Strategy):
         if not isinstance(metrics, MetricRecord):
             return f"missing MetricRecord '{KEY_METRICS}'"
         weight = metrics.get(self.weighted_by_key)
-        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not weight > 0:
-            return f"'{self.weighted_by_key}' must be a positive number, got {weight!r}"
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not 0 < weight < math.inf:
+            return f"'{self.weighted_by_key}' must be a positive finite number, got {weight!r}"
         if not train:
             return None
         for key in (KEY_ARRAYS, *self.extra_reply_records):
@@ -220,6 +221,11 @@ class FedAvg(Strategy):
         for k, v in record.items():
             if v.numpy().shape != self._global[k].shape:
                 return f"shape mismatch for '{k}'"
+        # A single NaN/inf would survive any averaging, clipping or noise and ruin the global model for good
+        for key in (KEY_ARRAYS, *self.extra_reply_records):
+            for k, v in content[key].items():
+                if not np.isfinite(v.numpy()).all():
+                    return f"non-finite values in '{key}/{k}'"
         return None
 
     def _valid_replies(self, replies: Iterable[Message], train: bool) -> list[Message]:
