@@ -2,26 +2,17 @@
 
 import json
 import os
-import time
 
 import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 
 from defai.config import validate_config
+from defai.results import build_history, run_name
 from defai.strategies import build_strategy
 from defai.task import build_model, get_device, load_centralized_testset, test
 
 app = ServerApp()
-
-
-def _run_name(cfg):
-    name = f"{cfg['dataset']}_{cfg['strategy']}_{cfg['partitioner']}"
-    if cfg["dp"] != "none":
-        name += f"_dp-{cfg['dp']}-{cfg['dp-side']}"
-    if cfg["attack"] != "none" and cfg["num-malicious"] > 0:
-        name += f"_{cfg['attack']}x{cfg['num-malicious']}"
-    return f"{name}_{time.strftime('%Y%m%d-%H%M%S')}"
 
 
 @app.main()
@@ -47,16 +38,10 @@ def main(grid: Grid, context: Context) -> None:
         evaluate_fn=global_evaluate,
     )
 
-    out_dir = os.path.join(cfg["output-dir"], _run_name(cfg))
+    out_dir = os.path.join(cfg["output-dir"], run_name(cfg))
     os.makedirs(out_dir, exist_ok=True)
 
-    history = []
-    for r in sorted(result.evaluate_metrics_serverapp):
-        row = {"round": r, **result.evaluate_metrics_serverapp[r]}
-        row.update(result.train_metrics_clientapp.get(r, {}))
-        row.update(result.evaluate_metrics_clientapp.get(r, {}))
-        history.append(row)
-    summary = {"config": dict(cfg), "history": history}
+    summary = {"config": dict(cfg), "history": build_history(result)}
     if strategy.dp is not None:
         summary["privacy"] = {
             "mechanism": strategy.dp.describe(),
