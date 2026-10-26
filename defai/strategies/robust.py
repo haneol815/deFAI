@@ -53,6 +53,9 @@ class FedTrimmedAvg(FedAvg):
         self.beta = beta
 
     def aggregate_updates(self, updates: list[ClientUpdate]) -> Arrays:
+        if int(self.beta * len(updates)) == 0:
+            log(WARNING, "\tFedTrimmedAvg: beta=%s trims nothing from %d updates (plain mean, not robust)",
+                self.beta, len(updates))
         return trimmed_mean([u.delta for u in updates], self.beta)
 
     def summary(self) -> None:

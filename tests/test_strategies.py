@@ -214,6 +214,14 @@ def test_robust_rules_reject_dp(cls):
         cls(dp=FixedClipping(1.0, 1.0))
 
 
+def test_trimmed_avg_warns_when_it_trims_nothing(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="flwr"):
+        run(FedTrimmedAvg(beta=0.05, **COMMON), rounds=1)  # int(0.05 * 8) == 0
+    assert "trims nothing" in caplog.text
+
+
 def test_bulyan_survives_byzantine_clients_and_selects_theta_updates():
     n = 11  # 4f + 3 with f = 2
     rng = np.random.default_rng(1)
