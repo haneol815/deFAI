@@ -148,3 +148,40 @@ def test_infeasible_adaptive_settings_fail_before_any_client_trains():
     with pytest.raises(ValueError, match="dp-clipped-count-stddev"):
         strategy.configure_train(1, to_record({"w": np.zeros(DIM, np.float32)}), ConfigRecord({"lr": 0.1}), grid)
     assert grid.sent == []
+
+
+class _BitClients(QuadraticClients):
+    """Honest clients report bit 1 (unclipped); node 1 reports ``bad_bit`` (None = omits it)."""
+
+    def __init__(self, targets, bad_bit, **kw):
+        super().__init__(targets, **kw)
+        self.bad_bit = bad_bit
+
+    def __call__(self, msg):
+        from flwr.app import Message, MetricRecord, RecordDict
+
+        reply = super().__call__(msg)
+        if "arrays" not in reply.content:
+            return reply
+        metrics = dict(reply.content["metrics"])
+        if msg.metadata.dst_node_id == 1:
+            if self.bad_bit is not None:
+                metrics["dp-unclipped-bit"] = self.bad_bit
+        else:
+            metrics["dp-unclipped-bit"] = 1
+        content = dict(reply.content)
+        content["metrics"] = MetricRecord(metrics)
+        return Message(content=RecordDict(content), reply_to=msg)
+
+
+@pytest.mark.parametrize("bad_bit", [10**6, -10**6, 2, None])
+def test_a_client_cannot_steer_the_clip_norm_with_a_malformed_bit(bad_bit, caplog):
+    import logging
+
+    dp = AdaptiveClipping(0.0, clip_norm=1.0, side="client", seed=0)
+    strategy = FedAvg(dp=dp, **COMMON)
+    with caplog.at_level(logging.WARNING, logger="flwr"):
+        w, _, _ = run_strategy(strategy, _BitClients(TARGETS, bad_bit), N, 3, DIM)
+    assert "unclipped-bit" in caplog.text
+    assert 0.1 < dp.clip_norm < 10 and np.all(np.isfinite(w))  # only well-formed replies steer C
+    assert dp.accountant.num_releases == 3
