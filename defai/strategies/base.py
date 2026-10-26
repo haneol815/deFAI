@@ -165,6 +165,8 @@ class FedAvg(Strategy):
             return []
         node_ids, self._population = self._sample(grid, self.fraction_train, self.min_train_nodes)
         self._num_sampled = len(node_ids)
+        if self.dp is not None:
+            self.dp.begin_round(self._num_sampled)
         log(INFO, "configure_train: Sampled %d nodes (out of %d)", len(node_ids), self._population)
 
         self._global = to_arrays(arrays)

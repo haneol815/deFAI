@@ -147,3 +147,20 @@ def test_client_side_adaptive_uses_reported_bits_and_requires_them():
         dp.aggregate([update_with_norm(0.3)] * 4, 4, unclipped_bits=None)
     with pytest.raises(ValueError):
         dp.aggregate([update_with_norm(0.3)] * 4, 4, unclipped_bits=[1, None, 1, 1])
+
+
+def test_default_bit_noise_never_drops_below_the_noise_multiplier():
+    """m / 20 is infeasible for small federations (needs z < m / 10); the default must still work."""
+    dp = AdaptiveClipping(1.0, 1.0, seed=0)  # m = 5 -> m / 20 = 0.25 < z
+    out, metrics = dp.aggregate([update_with_norm(1.0)] * 5, 5)
+    z_update = adaptive_noise_multiplier(1.0, 1.0)  # bit std falls back to z
+    assert metrics["dp-noise-std"] == pytest.approx(z_update * 1.0 / 5)
+    assert z_update == pytest.approx((1 - 0.25) ** -0.5)
+    assert (z_update**-2 + 2.0**-2) ** -0.5 == pytest.approx(1.0)  # still composes to z overall
+
+
+def test_begin_round_rejects_an_infeasible_explicit_bit_noise_with_an_actionable_message():
+    dp = AdaptiveClipping(1.0, 1.0, clipped_count_stddev=0.25)
+    with pytest.raises(ValueError, match="dp-clipped-count-stddev"):
+        dp.begin_round(5)
+    AdaptiveClipping(1.0, 1.0, clipped_count_stddev=0.6).begin_round(5)  # 2 * 0.6 > 1: fine
