@@ -159,8 +159,8 @@ class FedAvg(Strategy):
             return []
         if self.dp is not None and self.dp.budget_exhausted():
             if not self._budget_warned:
-                log(WARNING, "Privacy budget exhausted (epsilon=%.4f >= max_epsilon after next round); "
-                    "training stops here.", self.dp.epsilon)
+                log(WARNING, "Privacy budget reached: epsilon is %.4f and another round would exceed "
+                    "max_epsilon=%g; training stops here.", self.dp.epsilon, self.dp.max_epsilon)
                 self._budget_warned = True
             return []
         node_ids, self._population = self._sample(grid, self.fraction_train, self.min_train_nodes)
