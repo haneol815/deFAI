@@ -149,13 +149,16 @@ class _GaussianDP:
             released = {k: v + self._rng.normal(0.0, std, v.shape) for k, v in released.items()}
 
         self.accountant.compose(self.noise_multiplier)
+        # Only quantities covered by the accounting are published. The exact number of clipped
+        # clients is not (the adaptive mode releases a noisy version of it, below).
         metrics = {
             "dp-clip-norm": clip_norm,
             "dp-noise-std": std,
-            "dp-clipped-fraction": num_clipped / len(updates),
             "dp-epsilon": self.epsilon,
         }
-        self._update_clip_norm(num_sampled, len(updates), num_clipped, unclipped_bits)
+        noisy_fraction = self._update_clip_norm(num_sampled, len(updates), num_clipped, unclipped_bits)
+        if noisy_fraction is not None:
+            metrics["dp-noisy-unclipped-fraction"] = noisy_fraction
         return released, metrics
 
     # --- hooks ---------------------------------------------------------------
@@ -165,8 +168,9 @@ class _GaussianDP:
     def _validate_bits(self, unclipped_bits) -> None:
         """Hook: reject malformed client-reported bits (only adaptive clipping uses them)."""
 
-    def _update_clip_norm(self, num_sampled, num_replies, num_clipped, unclipped_bits) -> None:
-        """Fixed clipping keeps C constant."""
+    def _update_clip_norm(self, num_sampled, num_replies, num_clipped, unclipped_bits) -> float | None:
+        """Fixed clipping keeps C constant (and releases no clipping statistic)."""
+        return None
 
     def describe(self) -> str:
         return (
@@ -231,7 +235,7 @@ class AdaptiveClipping(_GaussianDP):
             # The bit query's sensitivity bound (and the clip-norm update) assume each bit is 0 or 1
             raise ValueError(f"'{KEY_UNCLIPPED_BIT}' must be 0 or 1, got {sorted(set(unclipped_bits))}")
 
-    def _update_clip_norm(self, num_sampled, num_replies, num_clipped, unclipped_bits) -> None:
+    def _update_clip_norm(self, num_sampled, num_replies, num_clipped, unclipped_bits) -> float:
         if self.side == "client":
             num_unclipped = float(sum(int(b) for b in unclipped_bits))
         else:
@@ -239,3 +243,4 @@ class AdaptiveClipping(_GaussianDP):
         noisy = num_unclipped + self._rng.normal(0.0, self._bit_std(num_sampled))
         unclipped_fraction = noisy / num_replies
         self.clip_norm *= float(np.exp(-self.clip_lr * (unclipped_fraction - self.target_quantile)))
+        return float(unclipped_fraction)

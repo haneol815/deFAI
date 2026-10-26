@@ -39,8 +39,8 @@ def test_fixed_clipping_without_noise_is_fixed_denominator_mean_of_clipped():
     out, metrics = dp.aggregate([update_with_norm(10.0), update_with_norm(0.5)], num_sampled=4)
     expected = (update_with_norm(1.0)["w"] + update_with_norm(0.5)["w"]) / 4
     np.testing.assert_allclose(out["w"], expected)
-    assert metrics["dp-clipped-fraction"] == 0.5
     assert metrics["dp-noise-std"] == 0.0
+    assert "dp-clipped-fraction" not in metrics  # the exact clipped count is not covered by the accounting
 
 
 def test_noise_std_is_z_times_c_over_m():
@@ -172,3 +172,18 @@ def test_client_reported_bits_must_be_zero_or_one_and_are_checked_before_account
     with pytest.raises(ValueError):
         dp.aggregate([update_with_norm(0.5)] * 4, 4, unclipped_bits=bad)
     assert dp.accountant.num_releases == 0 and dp.clip_norm == 1.0  # nothing was spent or changed
+
+
+def test_only_accounted_quantities_are_published():
+    fixed = FixedClipping(1.0, 1.0, seed=0)
+    _, metrics = fixed.aggregate([update_with_norm(5.0)] * 10, 10)
+    assert set(metrics) == {"dp-clip-norm", "dp-noise-std", "dp-epsilon"}
+
+    adaptive = AdaptiveClipping(1.0, 1.0, seed=0)
+    _, metrics = adaptive.aggregate([update_with_norm(5.0)] * 10 + [update_with_norm(0.1)] * 30, 40)
+    assert set(metrics) == {"dp-clip-norm", "dp-noise-std", "dp-epsilon", "dp-noisy-unclipped-fraction"}
+    # the published fraction is the noisy one that drives the clip-norm update (exactly 30/40 would be 0.75)
+    assert metrics["dp-noisy-unclipped-fraction"] != 0.75
+    assert adaptive.clip_norm == pytest.approx(
+        math.exp(-0.2 * (metrics["dp-noisy-unclipped-fraction"] - 0.5))
+    )
