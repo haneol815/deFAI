@@ -254,3 +254,54 @@ def test_bulyan_rejects_dp():
         Bulyan(dp=FixedClipping(1.0, 1.0))
 
 
+# ------------------------------------------------------------------------- reproducibility
+def partitions_sampled(seed, grid_seed, rounds=4, n=10):
+    """Registration positions (== partition ids in the simulation) picked in each round."""
+    from flwr.app import ConfigRecord as Cfg
+    from conftest import RegistrationOrderGrid
+    from defai.records import to_record as rec
+
+    targets = {i: np.zeros(DIM) for i in range(n)}
+    grid = RegistrationOrderGrid(n, lambda m: None, grid_seed)
+    position = {node: i for i, node in enumerate(grid.nodes)}
+    strategy = FedAvg(fraction_train=0.5, fraction_evaluate=0.5, seed=seed)
+    picked = []
+    for rnd in range(1, rounds + 1):
+        messages = strategy.configure_train(rnd, rec({"w": np.zeros(DIM, np.float32)}), Cfg({"lr": 0.1}), grid)
+        picked.append(sorted(position[m.metadata.dst_node_id] for m in messages))
+    assert targets  # keep the helper's signature honest
+    return picked
+
+
+def test_client_sampling_picks_the_same_partitions_whatever_the_random_node_ids():
+    first = partitions_sampled(seed=3, grid_seed=1)
+    assert first == partitions_sampled(seed=3, grid_seed=2)  # different random node ids, same partitions
+    assert first != partitions_sampled(seed=4, grid_seed=1)  # a different seed samples differently
+    assert all(len(p) == 5 for p in first)
+
+
+def test_aggregation_order_does_not_depend_on_reply_arrival_order():
+    from flwr.app import ConfigRecord as Cfg
+    from conftest import RegistrationOrderGrid
+    from defai.records import to_record as rec
+
+    seen = []
+
+    class Spy(FedAvg):
+        def aggregate_updates(self, updates):
+            seen.append([u.node_id for u in updates])
+            return super().aggregate_updates(updates)
+
+    n = 8
+    grid = RegistrationOrderGrid(n, lambda m: None, 5)
+    targets = dict(zip(grid.nodes, [np.full(DIM, float(i)) for i in range(n)]))
+    clients = QuadraticClients(targets, lr=0.5, steps=1, num_examples={node: 10 for node in grid.nodes})
+    strategy = Spy(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
+    messages = list(strategy.configure_train(1, rec({"w": np.zeros(DIM, np.float32)}), Cfg({"lr": 0.5}), grid))
+    replies = [clients(m) for m in messages]
+    rng = np.random.default_rng(0)
+    for _ in range(3):
+        rng.shuffle(replies)
+        strategy.aggregate_train(1, list(replies))
+    assert seen[0] == grid.nodes  # registration order, not id order and not arrival order
+    assert all(order == seen[0] for order in seen)

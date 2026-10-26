@@ -53,6 +53,23 @@ class ClientUpdate:
     extras: dict[str, Arrays] = field(default_factory=dict)  # additional ArrayRecords in the reply
 
 
+def ordered_node_ids(grid: Grid) -> list[int]:
+    """Connected node ids in registration order.
+
+    Node ids are random and ``Grid.get_node_ids`` is unordered, so neither is stable across
+    runs. The registration order is: the simulation registers node ``i`` before node ``i+1``
+    and gives it ``partition-id = i``, so a seeded sample of positions picks the same
+    partitions in every run. Grids that cannot tell (no ``registered_at``) fall back to
+    sorting by node id.
+    """
+    get_nodes = getattr(grid, "get_nodes", None)
+    if get_nodes is not None:
+        nodes = list(get_nodes())
+        if all(getattr(n, "registered_at", "") for n in nodes):
+            return [n.node_id for n in sorted(nodes, key=lambda n: (n.registered_at, n.node_id))]
+    return sorted(grid.get_node_ids())
+
+
 def weighted_metrics(metrics: list[dict], weights: list[float], skip: str) -> dict:
     """Weighted mean of numeric metrics (scalars or lists); non-numeric entries are ignored."""
     total = float(sum(weights))
@@ -117,6 +134,7 @@ class FedAvg(Strategy):
         self.server_learning_rate = server_learning_rate
         self.dp = dp
         self._rng = random.Random(seed)
+        self._rank: dict[int, int] = {}     # node id -> position in registration order
         self._global: Arrays | None = None  # model sent in the current round
         self._num_sampled = 0               # clients asked to train in the current round
         self._population = 0                # clients connected in the current round
@@ -133,10 +151,11 @@ class FedAvg(Strategy):
 
     # ----------------------------------------------------------------- sampling
     def _sample(self, grid: Grid, fraction: float, min_nodes: int) -> tuple[list[int], int]:
-        while len(all_nodes := list(grid.get_node_ids())) < max(self.min_available_nodes, min_nodes):
+        while len(all_nodes := ordered_node_ids(grid)) < max(self.min_available_nodes, min_nodes):
             log(INFO, "Waiting for nodes to connect: %d connected (minimum required: %d).",
                 len(all_nodes), max(self.min_available_nodes, min_nodes))
             time.sleep(1)
+        self._rank = {node_id: i for i, node_id in enumerate(all_nodes)}
         size = min(max(int(len(all_nodes) * fraction), min_nodes), len(all_nodes))
         return self._rng.sample(all_nodes, size), len(all_nodes)
 
@@ -254,6 +273,8 @@ class FedAvg(Strategy):
         valid = self._valid_replies(replies, train=True)
         if not valid:
             return None, None
+        # Replies arrive in arbitrary order; aggregate in a fixed one so float sums are reproducible
+        valid.sort(key=lambda m: self._rank.get(m.metadata.src_node_id, len(self._rank)))
         updates = self.select_updates([self._to_update(m) for m in valid])
 
         dp_metrics: dict = {}
