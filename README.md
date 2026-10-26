@@ -4,29 +4,48 @@ A federated learning (FL) assignment template built on [Flower](https://flower.a
 It simulates multiple clients (SuperNodes) on a single machine with the Flower Simulation Engine,
 and the same code can be deployed to a real distributed setup with the Deployment Engine.
 
-- Aggregation strategies: FedAvg, FedProx (Flower built-in strategies)
-- Datasets: MNIST, CIFAR-10 (downloaded and partitioned with [Flower Datasets](https://flower.ai/docs/datasets/))
+- Datasets: MNIST, CIFAR-10 (downloaded and partitioned with [Flower Datasets](https://flower.ai/docs/datasets/)),
+  plus an offline `synthetic` dataset for smoke tests
 - Partitioning: IID, Dirichlet non-IID
+- Algorithms (all implemented in this repo against Flower's `Strategy` interface — see [Algorithms](#algorithms)):
+  - non-IID: FedProx, SCAFFOLD, MOON
+  - server optimisation: FedAvgM, FedAdagrad, FedAdam, FedYogi
+  - Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum, Multi-Krum
+  - central differential privacy: fixed / adaptive clipping, server- or client-side, with an RDP accountant
+- Malicious-client simulation: label flipping, sign flipping, Gaussian-noise updates
 - Evaluation: federated (on each client's local data) + centralized (on the full test set at the server)
 
 ## Structure
 ```
 .
-├── pyproject.toml          # Dependencies + Flower app settings (run config)
+├── pyproject.toml            # Dependencies + Flower app settings (run config)
 ├── defai/
-│   ├── server_app.py       # ServerApp: strategy selection, rounds, centralized eval, result saving
-│   ├── client_app.py       # ClientApp: local training / evaluation
-│   └── task.py             # Model, data partitioning/loading, train/test functions
-├── scripts/plot.py         # Accuracy curve plotting
-├── docs/report.md          # Report template
-└── results/                # Experiment outputs (git-ignored)
+│   ├── server_app.py         # ServerApp: strategy selection, rounds, centralized eval, result saving
+│   ├── client_app.py         # ClientApp: local training / evaluation, per-client state, attacks, client-side DP
+│   ├── task.py               # Model, data partitioning/loading, local train/test (FedProx/SCAFFOLD/MOON hooks)
+│   ├── aggregation.py        # Pure-numpy rules: weighted mean, median, trimmed mean, Krum scores
+│   ├── attacks.py            # Malicious-client behaviours
+│   ├── records.py            # ArrayRecord <-> numpy helpers, wire-format keys
+│   ├── strategies/
+│   │   ├── base.py           # FedAvg + the hooks every strategy plugs into
+│   │   ├── heterogeneity.py  # FedProx, MOON, SCAFFOLD
+│   │   ├── fedopt.py         # FedAvgM, FedAdagrad, FedAdam, FedYogi
+│   │   ├── robust.py         # FedMedian, FedTrimmedAvg, Krum, Multi-Krum
+│   │   └── __init__.py       # registry + run-config -> strategy factory
+│   └── privacy/
+│       ├── dp.py             # Clipping + Gaussian noise (fixed / adaptive)
+│       └── accountant.py     # Renyi-DP accountant
+├── tests/                    # pytest suite (no network or GPU needed)
+├── scripts/plot.py           # Metric-per-round plotting
+├── docs/report.md            # Report template
+└── results/                  # Experiment outputs (git-ignored)
 ```
 
 ## Installation
 Requires Python 3.11 or later.
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e .            # add ".[plot]" for plotting, ".[test]" for the tests
 ```
 
 ## Usage
@@ -47,16 +66,109 @@ flwr run . --stream --federation-config "num-supernodes=10" \
 - Since Flower 1.32 the default number of simulated SuperNodes is 2, so set it with `--federation-config`.
   To change the default permanently instead:
   `flwr federation simulation-config --num-supernodes 10`
-- Results are saved to `results/<dataset>_<strategy>_<partitioner>_<timestamp>/history.json`.
+- Results are saved to `results/<dataset>_<strategy>_<partitioner>[_dp-...][_<attack>x<n>]_<timestamp>/history.json`.
+- `dataset='synthetic'` generates MNIST-like images locally, so a run needs no download. This is handy for smoke tests
+  and in environments without access to Hugging Face.
+- Recent Flower versions build a fresh virtual environment per `flwr run` and reinstall the app's dependencies.
+  To reuse the current environment instead (much faster, and works offline), run with
+  `FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1`.
 
 ```bash
 pip install -e ".[plot]"
 python scripts/plot.py results/*/history.json -o results/acc.png
+python scripts/plot.py results/*/history.json -m dp-epsilon -o results/eps.png   # any history key
 ```
 
+## Algorithms
+Select with `strategy='<name>'`. Every strategy is implemented in `defai/strategies/` on top of Flower's abstract
+`Strategy` interface; Flower's built-in strategies are not imported. The structure follows Flower's own
+`FedAvg`/`FedOpt`/`Krum`/DP wrappers (Flower 1.40; tested with 1.42).
+
+| `strategy` | Idea | Main settings | Reference |
+|---|---|---|---|
+| `fedavg` | Example-weighted average of client models | `server-learning-rate` | McMahan et al., 2017 |
+| `fedprox` | Proximal term `μ/2·‖w−w_global‖²` in the local loss | `proximal-mu` | Li et al., 2020 |
+| `moon` | Model-contrastive loss vs. global and previous local representation | `moon-mu`, `moon-temperature` | Li et al., 2021 |
+| `scaffold` | Control variates correct client drift (option II) | `learning-rate`, `local-epochs` | Karimireddy et al., 2020 |
+| `fedavgm` | Server momentum | `server-momentum`, `server-learning-rate` | Hsu et al., 2019 |
+| `fedadagrad` `fedadam` `fedyogi` | Adaptive server optimisers | `fedopt-learning-rate`, `beta-1`, `beta-2`, `tau` | Reddi et al., 2021 |
+| `fedmedian` | Coordinate-wise median | – | Yin et al., 2018 |
+| `fedtrimmedavg` | Coordinate-wise trimmed mean | `trim-ratio` | Yin et al., 2018 |
+| `krum` `multikrum` | Pick the update(s) closest to their neighbours | `num-byzantine`, `multikrum-select` | Blanchard et al., 2017 |
+
+SCAFFOLD and MOON keep per-client state (the client's control variate / previous local model) in
+`context.state`, which the simulation engine preserves between rounds.
+
+### Robustness experiments
+Clients with `partition-id < num-malicious` misbehave. `num-byzantine` is what the *defence* assumes (Krum's `f`);
+it is independent of the real number of attackers.
+```bash
+# 2 of 10 clients flip the sign of their update (x3); every client trains each round
+flwr run . --stream --federation-config "num-supernodes=10" --run-config \
+  "strategy='fedavg' fraction-train=1.0 attack='sign-flip' num-malicious=2 attack-scale=3.0"
+# ... and defend with Krum / trimmed mean / median
+flwr run . --stream --federation-config "num-supernodes=10" --run-config \
+  "strategy='krum' num-byzantine=2 fraction-train=1.0 attack='sign-flip' num-malicious=2 attack-scale=3.0"
+```
+`attack` is `label-flip` (labels y → 9−y while training), `sign-flip` (sends `global − scale·update`) or `gaussian`
+(sends `global + N(0, scale²)`). Krum needs at least `2f+3` replies per round to be meaningful.
+
+### Differential privacy
+`dp='fixed'` or `dp='adaptive'` adds central DP to any mean-based strategy (`fedavg`, `fedprox`, `moon`, `fedavgm`,
+`fedadagrad`, `fedadam`, `fedyogi`). Each round the server releases
+`(1/m)·Σ clip(update_i, C) + N(0, (z·C/m)²)` with `m` clients sampled per round, noise multiplier `z`
+(`dp-noise-multiplier`) and clipping norm `C` (`dp-clip-norm`).
+```bash
+flwr run . --stream --federation-config "num-supernodes=10" --run-config \
+  "dp='fixed' dp-noise-multiplier=1.0 dp-clip-norm=1.0 dp-delta=1e-5 dp-max-epsilon=8.0"
+flwr run . --stream --federation-config "num-supernodes=10" --run-config \
+  "dp='adaptive' dp-side='client' dp-target-quantile=0.5 dp-clip-lr=0.2"
+```
+- `dp-side='server'`: the server clips the updates. `dp-side='client'`: clients clip before sending (adaptive mode:
+  they also report whether they were clipped); the server still enforces the bound, so it holds for faulty clients too.
+- `dp='adaptive'` tracks the `dp-target-quantile` of the update norms (Andrew et al., 2019) and spends part of the
+  noise budget on the clipped-count query so that the overall noise multiplier stays `dp-noise-multiplier`.
+- `epsilon` is tracked per round (`dp-epsilon` in `history.json`, plus a `privacy` summary). With `dp-max-epsilon > 0`,
+  training stops before a round that would exceed the budget.
+
+What the guarantee does and does not cover:
+- It is (ε, δ)-DP for the released model updates under add/remove-one-client adjacency, accounted with Rényi DP.
+  **No amplification by client sampling is credited** (Flower samples a fixed number of clients, not Poisson), so ε is a
+  conservative upper bound.
+- The server-side optimiser runs *after* the noise, so it is post-processing and the guarantee holds for FedAvgM/FedOpt
+  as well. Aggregated training/evaluation metrics and the client-sampling pattern are **not** privatised.
+- `dp-noise-multiplier` is relative to the clipping norm and the noise is divided by `m`. With the handful of clients
+  of a classroom simulation the noise swamps the signal at any meaningful ε — useful privacy needs hundreds of clients
+  per round. The pipeline is the point here.
+- The noise RNG is seeded with `seed` so experiments are reproducible. That is wrong for real deployments.
+- `scaffold` and the robust rules are rejected together with DP: their sensitivity does not follow from clipping.
+
+## Tests
+```bash
+pip install -e ".[test]"
+pytest
+```
+The suite covers the aggregation rules, the accountant (cross-checked against Google's `dp-accounting` and against the
+exact Gaussian-mechanism δ(ε)), DP clipping/noise/adaptive-quantile convergence, every server strategy through
+`Strategy.start()` on a toy quadratic federation, the local-training hooks against hand-computed SGD, and
+`client_app.train` with a real `Context` (per-client state, attacks, client-side DP). It needs no network.
+
+## Notes on where this differs from Flower
+- **FedOpt**: following Reddi et al., the second moment starts at `τ²` and there is no Adam bias correction
+  (Flower initialises it with zeros and applies a bias correction).
+- **Adaptive clipping**: the clip norm is updated with the fraction of *unclipped* updates, `C ← C·exp(−η(b̃ − γ))`
+  (Andrew et al.), and the round's noise uses the norm that was used for clipping. Flower 1.42's
+  `DifferentialPrivacyServerSideAdaptiveClipping` feeds the *clipped* fraction into that formula, which turns the
+  feedback positive: in our check with fixed update norms `1..10` the clip norm shrank towards 0 from below the median
+  and grew without bound from above it, instead of settling at the target quantile.
+- **DP position**: noise is added to the mean update before the server optimiser, not to the final model.
+- **Training loss** reported by clients excludes the FedProx / MOON regularisers so it is comparable across algorithms.
+- **Multi-Krum** averages the selected updates uniformly (as in the paper); Flower weights them by example count.
+
 ## Extending
-- **New aggregation algorithm**: subclass `flwr.serverapp.strategy.FedAvg`, override `aggregate_train()` etc., and register it in `build_strategy()` in `server_app.py`.
-  Flower also ships with strategies such as FedAdam, FedYogi, FedMedian, and Krum.
+- **New aggregation algorithm**: subclass `defai.strategies.base.FedAvg` and override one of `select_updates`,
+  `aggregate_updates`, `update_global` (and `_extend_train_config` / `_extra_train_records` to send extra data to
+  clients), then register it in `STRATEGIES` and `build_strategy()` in `defai/strategies/__init__.py`.
 - **New local training method**: `train()` in `task.py` and `train()` in `client_app.py`
 - **New dataset/model**: `DATASETS` and `build_model()` in `task.py`
 - **Real distributed deployment**: [Deployment Engine guide](https://flower.ai/docs/framework/how-to-run-flower-with-deployment-engine.html)
