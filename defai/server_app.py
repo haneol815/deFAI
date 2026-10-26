@@ -1,6 +1,5 @@
 """ServerApp: orchestrates rounds, aggregates updates, evaluates the global model."""
 
-import json
 import os
 
 import torch
@@ -8,7 +7,7 @@ from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 
 from defai.config import validate_config
-from defai.results import build_history, run_name
+from defai.results import build_history, privacy_summary, run_name, write_summary
 from defai.strategies import build_strategy
 from defai.task import build_model, get_device, load_centralized_testset, test
 
@@ -43,15 +42,9 @@ def main(grid: Grid, context: Context) -> None:
 
     summary = {"config": dict(cfg), "history": build_history(result)}
     if strategy.dp is not None:
-        summary["privacy"] = {
-            "mechanism": strategy.dp.describe(),
-            "epsilon": strategy.dp.epsilon,
-            "delta": strategy.dp.delta,
-            "rounds_accounted": strategy.dp.accountant.num_releases,
-        }
+        summary["privacy"] = privacy_summary(strategy.dp)
         print(f"\nPrivacy spent: epsilon={strategy.dp.epsilon:.4f} at delta={strategy.dp.delta:g}")
-    with open(os.path.join(out_dir, "history.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+    write_summary(os.path.join(out_dir, "history.json"), summary)
 
     if cfg["save-model"]:
         torch.save(result.arrays.to_torch_state_dict(), os.path.join(out_dir, "final_model.pt"))

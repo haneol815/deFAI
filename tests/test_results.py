@@ -1,7 +1,11 @@
+import json
+import math
+
 from flwr.app import MetricRecord
 from flwr.serverapp.strategy import Result
 
-from defai.results import build_history, run_name
+from defai.privacy.dp import FixedClipping
+from defai.results import build_history, jsonable, privacy_summary, run_name, write_summary
 
 BASE = {"dataset": "mnist", "strategy": "fedavg", "partitioner": "iid", "dp": "none", "dp-side": "server",
         "attack": "none", "num-malicious": 0}
@@ -24,3 +28,28 @@ def test_build_history_merges_the_three_metric_sources_per_round():
         {"round": 0, "test_acc": 0.1},
         {"round": 1, "test_acc": 0.5, "train_loss": 2.0, "eval_acc": 0.4},
     ]
+
+
+def test_jsonable_replaces_only_non_finite_floats():
+    data = {"a": float("inf"), "b": [1.0, float("nan"), {"c": -math.inf}], "d": 3, "e": "x", "f": (1.5,)}
+    assert jsonable(data) == {"a": None, "b": [1.0, None, {"c": None}], "d": 3, "e": "x", "f": [1.5]}
+
+
+def test_summary_is_strict_json_even_with_infinite_epsilon(tmp_path):
+    dp = FixedClipping(0.0, 1.0)  # no noise -> epsilon is infinite
+    dp.accountant.compose(0.0)
+    summary = {"config": {}, "history": [{"round": 1, "dp-epsilon": dp.epsilon}], "privacy": privacy_summary(dp)}
+    path = tmp_path / "history.json"
+    write_summary(path, summary)
+    text = path.read_text()
+    assert "Infinity" not in text and "NaN" not in text
+    data = json.loads(text, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))  # strict parser
+    assert data["privacy"]["epsilon"] is None and data["privacy"]["epsilon_unbounded"] is True
+    assert data["history"][0]["dp-epsilon"] is None
+
+
+def test_privacy_summary_for_a_finite_budget():
+    dp = FixedClipping(1.0, 1.0, delta=1e-5)
+    dp.accountant.compose(1.0, 3)
+    out = privacy_summary(dp)
+    assert out["epsilon"] == dp.epsilon and out["epsilon_unbounded"] is False and out["rounds_accounted"] == 3

@@ -4,7 +4,7 @@ usage: python scripts/plot.py results/*/history.json -o results/acc.png
        python scripts/plot.py results/*/history.json -m dp-epsilon -o results/eps.png
 
 Any key of a history row can be plotted, e.g. test_acc (default), test_loss, eval_acc,
-train_loss, dp-epsilon, dp-clip-norm. Rounds that do not have the metric are skipped.
+train_loss, dp-epsilon, dp-clip-norm. Rounds without a (finite) value for the metric are skipped.
 """
 import argparse
 import json
@@ -24,7 +24,7 @@ def main():
         with open(path) as f:
             h = json.load(f)["history"]
         label = os.path.basename(os.path.dirname(path))
-        rows = [x for x in h if args.metric in x]
+        rows = [x for x in h if x.get(args.metric) is not None]  # null = infinite / missing
         plt.plot([x["round"] for x in rows], [x[args.metric] for x in rows], label=label)
 
     plt.xlabel("Round")
