@@ -8,6 +8,7 @@ References
 - Weighted mean:    McMahan et al., 2017 (FedAvg)
 - Median/trimmed:   Yin et al., 2018 "Byzantine-Robust Distributed Learning"
 - (Multi-)Krum:     Blanchard et al., 2017 "Machine Learning with Adversaries"
+- Bulyan:           El Mhamdi et al., 2018 "The Hidden Vulnerability of Distributed Learning in Byzantium"
 """
 
 from collections.abc import Sequence
@@ -100,3 +101,27 @@ def multi_krum_select(
         return [0]
     scores = krum_scores(pairwise_sq_distances(updates), num_byzantine)
     return [int(i) for i in np.argsort(scores, kind="stable")[: min(num_select, n)]]
+
+
+def bulyan_select(distances: np.ndarray, num_byzantine: int, num_select: int) -> list[int]:
+    """Bulyan's selection phase: apply Krum repeatedly, each time on the clients not yet chosen."""
+    remaining = list(range(distances.shape[0]))
+    chosen: list[int] = []
+    while remaining and len(chosen) < num_select:
+        scores = krum_scores(distances[np.ix_(remaining, remaining)], num_byzantine)
+        chosen.append(remaining.pop(int(np.argmin(scores))))
+    return chosen
+
+
+def closest_to_median_mean(updates: Sequence[Arrays], beta: int) -> Arrays:
+    """Per coordinate, average the ``beta`` values closest to the coordinate-wise median."""
+    n = len(updates)
+    if not 1 <= beta <= n:
+        raise ValueError("beta must be between 1 and the number of updates")
+    out = {}
+    for key in updates[0]:
+        stacked = _stack(updates, key)
+        distance_to_median = np.abs(stacked - np.median(stacked, axis=0))
+        closest = np.argpartition(distance_to_median, beta - 1, axis=0)[:beta]
+        out[key] = _like(np.take_along_axis(stacked, closest, axis=0).mean(axis=0), updates[0][key])
+    return out

@@ -4,14 +4,14 @@ from defai.privacy.dp import AdaptiveClipping, FixedClipping
 from defai.strategies.base import ClientUpdate, FedAvg
 from defai.strategies.fedopt import FedAdagrad, FedAdam, FedAvgM, FedYogi
 from defai.strategies.heterogeneity import FedProx, Moon, Scaffold
-from defai.strategies.robust import FedMedian, FedTrimmedAvg, Krum, MultiKrum
+from defai.strategies.robust import Bulyan, FedMedian, FedTrimmedAvg, Krum, MultiKrum
 
 STRATEGIES = {
     cls.name: cls
     for cls in (
         FedAvg, FedProx, Moon, Scaffold,
         FedAvgM, FedAdagrad, FedAdam, FedYogi,
-        FedMedian, FedTrimmedAvg, Krum, MultiKrum,
+        FedMedian, FedTrimmedAvg, Krum, MultiKrum, Bulyan,
     )
 }
 FEDOPT = ("fedadagrad", "fedadam", "fedyogi")
@@ -19,7 +19,7 @@ FEDOPT = ("fedadagrad", "fedadam", "fedyogi")
 __all__ = [
     "STRATEGIES", "build_strategy", "build_dp", "ClientUpdate",
     "FedAvg", "FedProx", "Moon", "Scaffold", "FedAvgM", "FedAdagrad", "FedAdam", "FedYogi",
-    "FedMedian", "FedTrimmedAvg", "Krum", "MultiKrum",
+    "FedMedian", "FedTrimmedAvg", "Krum", "MultiKrum", "Bulyan",
 ]
 
 
@@ -71,6 +71,7 @@ def build_strategy(cfg):
             "fedtrimmedavg": dict(beta=cfg["trim-ratio"]),
             "krum": dict(num_byzantine=cfg["num-byzantine"]),
             "multikrum": dict(num_byzantine=cfg["num-byzantine"], num_select=cfg["multikrum-select"]),
+            "bulyan": dict(num_byzantine=cfg["num-byzantine"]),
         }.get(name, {})
     )
     return STRATEGIES[name](**kwargs)

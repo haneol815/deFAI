@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from defai.privacy.dp import FixedClipping
 from defai.strategies import (
+    Bulyan,
     FedAdagrad,
     FedAdam,
     FedAvg,
@@ -211,3 +212,37 @@ def test_krum_selects_exactly_one_honest_clients_model():
 def test_robust_rules_reject_dp(cls):
     with pytest.raises(ValueError):
         cls(dp=FixedClipping(1.0, 1.0))
+
+
+def test_bulyan_survives_byzantine_clients_and_selects_theta_updates():
+    n = 11  # 4f + 3 with f = 2
+    rng = np.random.default_rng(1)
+    targets = {i: rng.normal(0, 0.3, DIM) for i in range(1, n + 1)}
+    bad = (1, 2)
+    honest_mean = np.mean([targets[i] for i in targets if i not in bad], axis=0)
+    common = dict(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
+
+    def final(strategy):
+        w, result, _ = run_strategy(strategy, QuadraticClients(targets, bad=bad), n, 30, DIM)
+        return w, result
+
+    w_avg, _ = final(FedAvg(**common))
+    w_bulyan, result = final(Bulyan(num_byzantine=2, **common))
+    assert np.linalg.norm(w_avg - honest_mean) > 100
+    assert np.linalg.norm(w_bulyan - honest_mean) < 0.5
+    assert np.all(np.isfinite(w_bulyan))
+
+
+def test_bulyan_warns_and_degrades_with_too_few_replies(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="flwr"):
+        w, _, _ = run(Bulyan(num_byzantine=2, **COMMON), rounds=2)  # 8 replies < 4*2+3
+    assert "robustness guarantee does not hold" in caplog.text and np.all(np.isfinite(w))
+
+
+def test_bulyan_rejects_dp():
+    with pytest.raises(ValueError):
+        Bulyan(dp=FixedClipping(1.0, 1.0))
+
+
