@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from datasets import ClassLabel, Dataset, Features, load_dataset
+from datasets import Array2D, ClassLabel, Dataset, Features, load_dataset
 from datasets import Image as HFImage
 from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner
@@ -14,6 +14,7 @@ from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Normalize, ToTensor
 
+from defai import mirror
 from defai.attacks import flip_labels
 
 DATASETS = {
@@ -30,6 +31,24 @@ DATASETS = {
         "channels": 3,
         "img_size": 32,
         "norm": ((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
+    },
+    # The same data as `mnist` and, for Fashion-MNIST, a harder 28x28 task, fetched from file mirrors (defai/mirror.py)
+    # instead of the Hugging Face hub
+    "mnist-mirror": {
+        "hf_name": None,
+        "image_key": "image",
+        "channels": 1,
+        "img_size": 28,
+        "norm": ((0.1307,), (0.3081,)),
+        "mirror": True,
+    },
+    "fashion-mnist-mirror": {
+        "hf_name": None,
+        "image_key": "image",
+        "channels": 1,
+        "img_size": 28,
+        "norm": ((0.2860,), (0.3530,)),
+        "mirror": True,
     },
     # Generated locally (no download): lets tests and smoke runs work offline.
     "synthetic": {
@@ -83,7 +102,10 @@ def _make_transform(dataset):
     key = spec["image_key"]
 
     def apply(batch):
-        batch["x"] = [tf(img) for img in batch.pop(key)]
+        images = batch.pop(key)
+        if spec.get("mirror"):  # stored as plain arrays rather than encoded images
+            images = [np.asarray(img, dtype=np.uint8) for img in images]
+        batch["x"] = [tf(img) for img in images]
         batch["y"] = batch.pop("label")
         return batch
 
@@ -91,6 +113,7 @@ def _make_transform(dataset):
 
 
 _SYNTHETIC = {}
+_MIRRORED = {}
 _sources = {}  # partition sources cached per ClientApp process, keyed by their configuration
 
 
@@ -112,6 +135,26 @@ def _synthetic_split(split):
     return _SYNTHETIC[split]
 
 
+def _mirror_split(dataset, split):
+    """MNIST-like data from defai.mirror as a Hugging Face Dataset (so the Flower partitioners can split it)."""
+    if (dataset, split) not in _MIRRORED:
+        images, labels = mirror.load_split(dataset, split)
+        _MIRRORED[(dataset, split)] = Dataset.from_dict(
+            {"image": images, "label": labels.tolist()},
+            features=Features({"image": Array2D((mirror.IMG_SIZE, mirror.IMG_SIZE), "uint8"), "label": ClassLabel(num_classes=NUM_CLASSES)}),
+        )
+    return _MIRRORED[(dataset, split)]
+
+
+def _local_split(dataset, split):
+    """The split of a dataset that does not come from the Hugging Face hub, or None if it does."""
+    if dataset == "synthetic":
+        return _synthetic_split(split)
+    if DATASETS[dataset].get("mirror"):
+        return _mirror_split(dataset, split)
+    return None
+
+
 def _partition_source(num_partitions, cfg):
     """Object with ``load_partition(partition_id)`` for the configured dataset/partitioner."""
     key = (cfg["dataset"], cfg["partitioner"], cfg["dirichlet-alpha"], cfg["seed"], num_partitions)
@@ -127,8 +170,9 @@ def _partition_source(num_partitions, cfg):
             )
         else:
             raise ValueError(f"unknown partitioner: {cfg['partitioner']}")
-        if cfg["dataset"] == "synthetic":
-            partitioner.dataset = _synthetic_split("train")
+        local = _local_split(cfg["dataset"], "train")
+        if local is not None:
+            partitioner.dataset = local
             _sources[key] = partitioner
         else:
             _sources[key] = FederatedDataset(
@@ -165,9 +209,8 @@ def load_client_data(partition_id, num_partitions, cfg):
 
 def load_centralized_testset(dataset, batch_size=256):
     """Full test split, used by the ServerApp for centralized evaluation."""
-    if dataset == "synthetic":
-        test = _synthetic_split("test")
-    else:
+    test = _local_split(dataset, "test")
+    if test is None:
         test = load_dataset(DATASETS[dataset]["hf_name"], split="test")
     return DataLoader(test.with_transform(_make_transform(dataset)), batch_size=batch_size)
 

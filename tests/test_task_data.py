@@ -160,3 +160,56 @@ def test_label_skew_is_one_over_classes_when_uniform_and_one_when_each_client_ha
     assert task.label_skew(task.partition_label_counts(NUM_PARTITIONS, config(partitioner="dirichlet"))) == pytest.approx(
         label_skew(config(partitioner="dirichlet"))
     )
+
+
+# ----------------------------------------------------------------------- mirrored real datasets
+@pytest.fixture
+def fake_mirror(monkeypatch):
+    """defai.mirror.load_split replaced by small random 'images', so the tests need no download."""
+    sizes = {"train": 400, "test": 100}
+    calls = []
+
+    def load_split(name, split):
+        calls.append((name, split))
+        rng = np.random.default_rng({"train": 1, "test": 2}[split])
+        labels = (np.arange(sizes[split]) % 10).astype(np.uint8)
+        images = rng.integers(0, 256, (sizes[split], 28, 28), dtype=np.uint8)
+        images[:, 0, 0] = labels  # the label is readable from the first pixel
+        return images, labels
+
+    task._MIRRORED.clear()
+    monkeypatch.setattr(task.mirror, "load_split", load_split)
+    yield calls
+    task._MIRRORED.clear()
+
+
+@pytest.mark.parametrize("dataset", ["mnist-mirror", "fashion-mnist-mirror"])
+def test_mirrored_datasets_are_partitioned_and_yield_model_ready_batches(fake_mirror, dataset):
+    cfg = config(dataset=dataset, partitioner="iid")
+    sizes = [len(labels_of(i, cfg)) for i in range(NUM_PARTITIONS)]
+    assert sum(sizes) == 400 and fake_mirror == [(dataset, "train")]
+    assert task._mirror_split(dataset, "train") is task._mirror_split(dataset, "train") and len(fake_mirror) == 1  # cached
+    trainloader, valloader = task.load_client_data(0, NUM_PARTITIONS, cfg)
+    assert (len(trainloader.dataset), len(valloader.dataset)) == (32, 8)
+    batch = next(iter(trainloader))
+    assert batch["x"].shape == (32, 1, 28, 28) and batch["x"].dtype == torch.float32 and batch["y"].dtype == torch.int64
+    mean, std = task.DATASETS[dataset]["norm"][0][0], task.DATASETS[dataset]["norm"][1][0]
+    # pixel p becomes (p / 255 - mean) / std
+    assert float(batch["x"].min()) >= -mean / std - 1e-6 and float(batch["x"].max()) <= (1 - mean) / std + 1e-6
+    labels = batch["y"].numpy()
+    first_pixel = np.rint((batch["x"][:, 0, 0, 0].numpy() * std + mean) * 255)
+    assert np.array_equal(first_pixel, labels)  # images and labels stay paired through partitioning and transform
+
+
+def test_mirrored_datasets_work_with_the_dirichlet_partitioner_and_the_central_test_set(fake_mirror):
+    cfg = config(dataset="mnist-mirror", partitioner="dirichlet", **{"dirichlet-alpha": 0.1})
+    assert label_skew(cfg) > 0.4
+    test = task.load_centralized_testset("mnist-mirror")
+    assert len(test.dataset) == 100 and next(iter(test))["x"].shape == (100, 1, 28, 28)
+    assert ("mnist-mirror", "test") in fake_mirror
+
+
+def test_every_dataset_is_either_from_the_hub_a_mirror_or_synthetic():
+    for name, spec in task.DATASETS.items():
+        assert bool(spec["hf_name"]) + bool(spec.get("mirror")) + (name == "synthetic") == 1, name
+        assert (spec.get("mirror") is True) == (name in task.mirror.MIRRORS), name
