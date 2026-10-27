@@ -216,3 +216,49 @@ def test_a_single_evaluating_client_has_zero_spread():
     (msg, *_) = strategy.configure_evaluate(1, START, ConfigRecord({}), grid)
     out = dict(strategy.aggregate_evaluate(1, [eval_reply(msg, 0.7)]))
     assert out["eval_acc_std"] == 0.0 and out["eval_acc_min"] == out["eval_acc_max"] == pytest.approx(0.7)
+
+
+# ------------------------------------------------------------------------ communication accounting
+MIB = 2**20
+
+
+def payload(record):
+    return sum(len(a.data) for a in record.values())
+
+
+def test_training_traffic_is_counted_down_up_and_cumulatively():
+    dim = 10_000
+    targets = {n: np.full(dim, float(n)) for n in range(1, N + 1)}
+    strategy = FedAvg(**COMMON)
+    result = strategy.start(grid=FakeGrid(N, QuadraticClients(targets)), initial_arrays=to_record({"w": np.zeros(dim, np.float32)}),
+                            num_rounds=3, train_config=ConfigRecord({"lr": 0.1}))
+    model = payload(to_record({"w": np.zeros(dim, np.float32)}))
+    assert model >= dim * 4  # the payload is at least the raw float32 data
+    for rnd in (1, 2, 3):
+        m = result.train_metrics_clientapp[rnd]
+        assert m["comm-mb-down"] == pytest.approx(N * model / MIB)
+        assert m["comm-mb-up"] == pytest.approx(N * model / MIB)
+        assert m["comm-mb-total"] == pytest.approx(rnd * 2 * N * model / MIB)  # grows by one round trip per round
+
+
+def test_scaffold_pays_for_its_control_variates_in_both_directions():
+    dim = 5_000
+    targets = {n: np.full(dim, float(n)) for n in range(1, N + 1)}
+    start = to_record({"w": np.zeros(dim, np.float32)})
+
+    def first_round(strategy):
+        r = strategy.start(grid=FakeGrid(N, QuadraticClients(targets)), initial_arrays=start, num_rounds=1, train_config=ConfigRecord({"lr": 0.1}))
+        return r.train_metrics_clientapp[1]
+
+    plain, scaffold = first_round(FedAvg(**COMMON)), first_round(Scaffold(**COMMON))
+    assert scaffold["comm-mb-down"] == pytest.approx(2 * plain["comm-mb-down"])  # model + c
+    assert scaffold["comm-mb-up"] == pytest.approx(2 * plain["comm-mb-up"])      # model + c-delta
+
+
+def test_clients_may_report_the_bytes_they_really_sent_for_compressed_uploads():
+    strategy = FedAvg(**COMMON)
+    messages, _ = configured(strategy)
+    reply = lambda m, **kw: good_reply(m, metrics=MetricRecord({"num-examples": 10, "upload-bytes": 1000, **kw}))  # noqa: E731
+    _, metrics = aggregate(strategy, [reply(m) for m in messages])
+    assert metrics["comm-mb-up"] == pytest.approx(N * 1000 / MIB)
+    assert "upload-bytes" not in metrics  # the raw per-client value is not averaged into the metrics

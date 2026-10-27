@@ -88,6 +88,13 @@ def weighted_metrics(metrics: list[dict], weights: list[float], skip: str) -> di
 
 
 FAIRNESS_METRIC = "eval_acc"
+KEY_UPLOAD_BYTES = "upload-bytes"  # optional client metric: bytes actually sent (set when updates are compressed)
+MB = 2**20
+
+
+def record_bytes(record: ArrayRecord) -> int:
+    """Size of an ArrayRecord's payload, counted like Flower does (``len(array.data)``)."""
+    return sum(len(array.data) for array in record.values())
 
 
 def client_spread(metrics: list[dict], key: str) -> dict:
@@ -153,6 +160,8 @@ class FedAvg(Strategy):
         self.dp = dp
         self._rng = random.Random(seed)
         self._rank: dict[int, int] = {}     # node id -> position in registration order
+        self._down_bytes = 0                # model payload sent to the clients of the current round
+        self._comm_total = 0                # cumulative training traffic (down + up) of the run
         self._global: Arrays | None = None  # model sent in the current round
         self._num_sampled = 0               # clients asked to train in the current round
         self._population = 0                # clients connected in the current round
@@ -215,6 +224,8 @@ class FedAvg(Strategy):
         content = RecordDict(
             {KEY_ARRAYS: arrays, KEY_CONFIG: config, **self._extra_train_records(server_round)}
         )
+        self._down_bytes = len(node_ids) * sum(record_bytes(r) for r in content.array_records.values())
+        self._comm_total += self._down_bytes
         return self._messages(content, node_ids, MessageType.TRAIN)
 
     def _check_reply(self, content: RecordDict, train: bool) -> str | None:
@@ -317,8 +328,23 @@ class FedAvg(Strategy):
         metrics = weighted_metrics([u.metrics for u in updates], [u.weight for u in updates], self.weighted_by_key)
         if self.dp is not None:
             metrics.pop(KEY_UNCLIPPED_BIT, None)  # their exact mean is the clipped count the DP noise protects
+        metrics.pop(KEY_UPLOAD_BYTES, None)
         metrics.update(dp_metrics)
+        metrics.update(self._communication(valid))
         return to_record(new_global), MetricRecord(metrics)
+
+    def _communication(self, replies: list[Message]) -> dict[str, float]:
+        """Training traffic of this round in MiB, and the running total of the run.
+
+        Uploads are what the clients report in ``upload-bytes`` (compressed size) or, if they do not,
+        the payload of the ArrayRecords they sent. Evaluation messages are not counted.
+        """
+        up = 0
+        for msg in replies:
+            reported = msg.content[KEY_METRICS].get(KEY_UPLOAD_BYTES)
+            up += int(reported) if reported is not None else sum(record_bytes(r) for r in msg.content.array_records.values())
+        self._comm_total += up
+        return {"comm-mb-down": self._down_bytes / MB, "comm-mb-up": up / MB, "comm-mb-total": self._comm_total / MB}
 
     # ----------------------------------------------------------------- evaluate
     def configure_evaluate(
