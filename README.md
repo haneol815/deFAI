@@ -32,10 +32,11 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 │   ├── aggregation.py        # Pure-numpy rules: weighted mean, median, trimmed mean, Krum, Bulyan
 │   ├── attacks.py            # Malicious-client behaviours
 │   ├── compression.py        # Top-k / quantisation / error feedback for client updates
+│   ├── mirror.py             # MNIST / Fashion-MNIST from plain-file mirrors (checksummed, cached)
 │   ├── records.py            # ArrayRecord <-> numpy helpers, wire-format keys
 │   ├── strategies/
 │   │   ├── base.py           # FedAvg + the hooks every strategy plugs into
-│   │   ├── heterogeneity.py  # FedProx, MOON, SCAFFOLD
+│   │   ├── heterogeneity.py  # FedProx, MOON, SCAFFOLD, FedNova, q-FedAvg
 │   │   ├── fedopt.py         # FedAvgM, FedAdagrad, FedAdam, FedYogi
 │   │   ├── robust.py         # FedMedian, FedTrimmedAvg, Krum, Multi-Krum, Bulyan
 │   │   └── __init__.py       # registry + run-config -> strategy factory
@@ -46,7 +47,10 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 ├── scripts/plot.py           # Metric-per-round plotting
 ├── scripts/compare.py        # Results table (mean ± std over seeds, rounds-to-target, epsilon)
 ├── scripts/partition_stats.py # Per-client class counts of a partitioning (+ heat map)
+├── scripts/run_grid.py       # Resumable variants x seeds experiment grids
 ├── docs/report.md            # Report template
+├── docs/experiments.md       # Results of the experiment grids, with caveats
+├── .github/workflows/tests.yml # CI: ruff + the offline test suite
 └── results/                  # Experiment outputs (git-ignored)
 ```
 
@@ -267,7 +271,7 @@ The suite covers the aggregation rules, the accountant (cross-checked against Go
 exact Gaussian-mechanism δ(ε)), DP clipping/noise/adaptive-quantile convergence, every server strategy through
 `Strategy.start()` on a toy quadratic federation, the local-training hooks against hand-computed SGD, and
 `client_app.train` with a real `Context` (per-client state, attacks, client-side DP, reproducibility), config validation
-and the helper scripts. It needs no network.
+and the helper scripts. It needs no network. GitHub Actions runs `ruff check .` and the suite on every push.
 
 ## Notes on where this differs from Flower
 - **FedOpt**: following Reddi et al., the second moment starts at `τ²` and there is no Adam bias correction
