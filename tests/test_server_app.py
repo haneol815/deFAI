@@ -88,3 +88,14 @@ def test_an_invalid_config_fails_before_any_client_is_contacted(tmp_path):
     with pytest.raises(ValueError, match="attack"):
         server_app.main(grid, Context(run_id=1, node_id=0, node_config={}, state=RecordDict(), run_config=cfg))
     assert grid.sent == [] and list(tmp_path.iterdir()) == []
+
+
+def test_training_survives_clients_that_drop_out_and_the_traffic_shows_it(tmp_path):
+    _, summary, _ = run(tmp_path, **{"dropout-rate": 0.5, "num-server-rounds": 4})
+    history = summary["history"]
+    assert [row["round"] for row in history] == [0, 1, 2, 3, 4]
+    trained = [row for row in history if "comm-mb-up" in row]  # rounds in which at least one client answered
+    assert trained, "with 4 clients per round at least one round should have survivors"
+    # missing replies mean less upload than download: the accounting sees the dropouts
+    assert any(row["comm-mb-up"] < row["comm-mb-down"] for row in trained)
+    assert all(row["comm-mb-up"] <= row["comm-mb-down"] for row in trained)

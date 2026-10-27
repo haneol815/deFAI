@@ -32,6 +32,7 @@ def test_default_config_is_valid():
         ({"dp-delta": 0.0}, "dp-delta"),
         ({"dp-clip-norm": -1.0}, "dp-clip-norm"),
         ({"num-malicious": -1}, "num-malicious"),
+        ({"dropout-rate": 1.5}, "dropout-rate"),
         ({"learning-rate": 0.0}, "learning-rate"),
     ],
 )

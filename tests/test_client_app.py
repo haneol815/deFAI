@@ -225,3 +225,31 @@ def test_evaluate_returns_loss_and_accuracy():
     reply = client_app.evaluate(msg, context(config()))
     metrics = reply.content["metrics"]
     assert 0.0 <= metrics["eval_acc"] <= 1.0 and metrics["eval_loss"] > 0 and metrics["num-examples"] > 0
+
+
+# ------------------------------------------------------------------------------- client dropout
+def test_a_dropped_out_client_answers_with_an_error_and_changes_no_state():
+    from flwr.common.constant import ErrorCode
+
+    cfg = config(**{"dropout-rate": 1.0})
+    reply, ctx = run_train(cfg, **{KEY_C: zero_control_variate()})
+    assert reply.has_error() and reply.error.code == ErrorCode.NODE_UNAVAILABLE
+    assert "dropout" in reply.error.reason
+    assert STATE_SCAFFOLD_C not in ctx.state  # it never trained, so its control variate is untouched
+
+
+def test_without_dropout_the_client_always_answers():
+    reply, _ = run_train(config(**{"dropout-rate": 0.0}))
+    assert not reply.has_error()
+
+
+def test_dropout_follows_the_rate_and_is_fixed_by_seed_partition_and_round():
+    cfg = config(**{"dropout-rate": 0.3})
+    decisions = [client_app.dropped_out(cfg, p, r) for p in range(40) for r in range(1, 51)]
+    assert sum(decisions) / len(decisions) == pytest.approx(0.3, abs=0.04)
+    again = [client_app.dropped_out(cfg, p, r) for p in range(40) for r in range(1, 51)]
+    assert decisions == again  # reproducible
+    other = [client_app.dropped_out({**cfg, "seed": cfg["seed"] + 1}, p, r) for p in range(40) for r in range(1, 51)]
+    assert decisions != other  # but not the same for another seed
+    assert not any(client_app.dropped_out({**cfg, "dropout-rate": 0.0}, p, r) for p in range(40) for r in range(1, 51))
+    assert all(client_app.dropped_out({**cfg, "dropout-rate": 1.0}, p, r) for p in range(5) for r in range(1, 6))

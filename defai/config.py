@@ -43,6 +43,7 @@ RANGES = {
     "num-byzantine": (lambda v: v >= 0, ">= 0"),
     "multikrum-select": (lambda v: v >= 1, ">= 1"),
     "num-malicious": (lambda v: v >= 0, ">= 0"),
+    "dropout-rate": (lambda v: 0 <= v <= 1, "in [0, 1]"),
     "dp-noise-multiplier": (lambda v: v >= 0, ">= 0"),
     "dp-clip-norm": (lambda v: v > 0, "> 0"),
     "dp-delta": (lambda v: 0 < v < 1, "in (0, 1)"),

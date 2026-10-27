@@ -68,6 +68,8 @@ multikrum-select = 3        # multikrum: number of updates averaged
 attack = "none"             # none | label-flip | sign-flip | gaussian
 num-malicious = 0
 attack-scale = 1.0          # sign-flip: multiplier; gaussian: std of the replacement update
+# client failures
+dropout-rate = 0.0          # probability that a sampled client does not answer a train message
 # differential privacy (mean-based strategies only)
 dp = "none"                 # none | fixed | adaptive
 dp-side = "server"          # server: server clips | client: clients clip (server still enforces the bound)

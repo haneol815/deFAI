@@ -10,8 +10,9 @@ import copy
 
 import numpy as np
 import torch
-from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
+from flwr.app import ArrayRecord, Context, Error, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
+from flwr.common.constant import ErrorCode
 
 from defai.aggregation import l2_norm
 from defai.attacks import is_malicious, poison_update
@@ -30,6 +31,12 @@ from defai.task import test as test_fn
 from defai.task import train as train_fn
 
 app = ClientApp()
+
+
+def dropped_out(cfg, partition_id, server_round) -> bool:
+    """Whether this client fails to answer this round (``dropout-rate``), fixed by (seed, partition, round)."""
+    rate = cfg["dropout-rate"]
+    return rate > 0 and np.random.default_rng([cfg["seed"], partition_id, server_round, 1]).random() < rate
 
 
 def _frozen(model, device):
@@ -58,6 +65,9 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     device = get_device()
     lr = config["lr"]
+    if dropped_out(cfg, partition_id, config["server-round"]):
+        # Decided before any work or state change: the client simply never answers this round
+        return Message(Error(code=ErrorCode.NODE_UNAVAILABLE, reason="simulated client dropout"), reply_to=msg)
     # Reproducible local training (data order) for a given seed, whichever worker runs the client
     torch.manual_seed(int(np.random.SeedSequence([cfg["seed"], partition_id, config["server-round"]]).generate_state(1)[0]))
 
