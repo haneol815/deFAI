@@ -57,9 +57,9 @@ What can and cannot be concluded:
 - **FedAvg, FedProx, FedNova, MOON and SCAFFOLD are not separated by these runs.** Their last-3 means lie between
   0.60 and 0.63 and the spread over the two seeds is up to 0.06. SCAFFOLD has the highest `best acc` (0.68), and in
   seed 1 it ends clearly ahead (0.67 against 0.60 for FedAvg), but in seed 2 it ends behind (0.62 against 0.64).
-- **FedProx is indistinguishable from FedAvg** for μ = 0.01 and μ = 0.1: the curves agree to about ±0.01 in every
-  round. With a learning rate of 0.01 and a model that moves little within one epoch, the proximal pull is tiny at
-  these values; larger μ was not tried.
+- **FedProx is indistinguishable from FedAvg** for μ = 0.01 and μ = 0.1: the accuracy curves differ by at most 0.004
+  (μ = 0.01) and 0.03 (μ = 0.1) in any round, less than the round-to-round jumps. With a learning rate of 0.01 and a
+  model that moves little within one epoch, the proximal pull is tiny at these values; larger μ was not tried.
 - **q-FedAvg (q = 0.1) is clearly worse** here: 0.50 against 0.62 for FedAvg, in both seeds, and its curve is still
   climbing at round 12. Its update divides by `q·F^(q-1)·‖Δ‖² + L·F^q` with `L = 1/lr`; with lr = 0.01 that
   probably shrinks the step a lot (not verified). It was meant to help the *worst* clients, and it does not here.
