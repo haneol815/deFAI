@@ -129,6 +129,47 @@ def test_plot_script_accepts_any_history_key(tmp_path):
     assert out.exists() and out.stat().st_size > 0
 
 
+def test_plot_group_draws_the_mean_with_a_one_std_band_per_configuration(tmp_path):
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+
+    plot = load_script("plot")
+    plt.close("all")
+    paths = [
+        write_run(tmp_path, "a0", [0.1, 0.5, 0.9], seed=0),
+        write_run(tmp_path, "a1", [0.3, 0.7, 0.5], seed=1),
+        write_run(tmp_path, "b", [0.1, 0.2, 0.3], strategy="scaffold"),
+    ]
+    out = tmp_path / "g.png"
+    plot.main([*paths, "--group", "--title", "two seeds", "-o", str(out)])
+    ax = plt.gca()
+    lines = ax.get_lines()
+    assert [line.get_label() for line in lines] == ["fedavg synthetic iid (n=2)", "scaffold synthetic iid (n=1)"]
+    assert list(lines[0].get_ydata()) == pytest.approx([0.2, 0.6, 0.7]) and list(lines[0].get_xdata()) == [0, 1, 2]
+    assert ax.get_title() == "two seeds" and out.exists() and out.stat().st_size > 0
+    std = [0.1414214, 0.1414214, 0.2828427]  # sample standard deviation of the two seeds in each round
+    band = ax.collections[0].get_paths()[0].vertices[:, 1]
+    assert band.min() == pytest.approx(min(m - d for m, d in zip([0.2, 0.6, 0.7], std)), abs=1e-6)
+    assert band.max() == pytest.approx(max(m + d for m, d in zip([0.2, 0.6, 0.7], std)), abs=1e-6)
+    flat = ax.collections[1].get_paths()[0].vertices[:, 1]  # a single run: no spread
+    assert sorted(set(flat.round(6))) == [0.1, 0.2, 0.3]
+    plt.close("all")
+
+
+def test_plot_group_skips_rounds_without_a_value_for_the_metric(tmp_path):
+    pytest.importorskip("matplotlib")
+    import matplotlib.pyplot as plt
+
+    plot = load_script("plot")
+    plt.close("all")
+    paths = [write_run(tmp_path, "a0", [0.1, 0.5, 0.9], seed=0, columns={"dp-epsilon": [None, 1.0, 3.0]}),
+             write_run(tmp_path, "a1", [0.1, 0.5, 0.9], seed=1, columns={"dp-epsilon": [None, 3.0, None]})]
+    plot.main([*paths, "--group", "-m", "dp-epsilon", "-o", str(tmp_path / "e.png")])
+    line = plt.gca().get_lines()[0]
+    assert list(line.get_xdata()) == [1, 2] and list(line.get_ydata()) == pytest.approx([2.0, 3.0])
+    plt.close("all")
+
+
 def test_scripts_handle_null_epsilon_from_unbounded_runs(tmp_path):
     compare, plot = load_script("compare"), load_script("plot")
     path = write_run(tmp_path, "inf", [0.1, 0.5], dp="fixed", **{"dp-side": "server", "dp-noise-multiplier": 0.0},
