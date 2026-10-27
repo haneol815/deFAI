@@ -2,14 +2,16 @@
 
 The server decides which federated algorithm the client runs by what it puts into the
 train message: ``proximal-mu`` (FedProx), a ``c`` control variate (SCAFFOLD),
-``moon-mu`` (MOON) and ``dp-clip-norm`` (client-side DP clipping). Algorithms that need
-memory between rounds keep it in ``context.state``.
+``moon-mu`` (MOON), ``report-initial-loss`` (q-FedAvg) and ``dp-clip-norm`` (client-side
+DP clipping). Algorithms that need memory between rounds keep it in ``context.state``.
+The run config adds simulated misbehaviour: ``attack`` and ``dropout-rate``.
 """
 
 import copy
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 from flwr.app import ArrayRecord, Context, Error, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
 from flwr.common.constant import ErrorCode
@@ -96,6 +98,12 @@ def train(msg: Message, context: Context):
     malicious = cfg["attack"] != "none" and is_malicious(partition_id, cfg["num-malicious"])
     if malicious and cfg["attack"] == "label-flip":
         options["flip_num_classes"] = NUM_CLASSES
+
+    if config.get("report-initial-loss", False):
+        # Loss of the *received* model on the local training data (q-FedAvg's F_k(w^t)), measured
+        # before training; the loader is unshuffled so the training data order is not touched.
+        loader = DataLoader(trainloader.dataset, batch_size=cfg["batch-size"])
+        extra_metrics["initial-loss"] = max(test_fn(model, loader, device)[0], 1e-12)
 
     train_loss, steps = train_fn(
         model,

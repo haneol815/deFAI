@@ -261,3 +261,24 @@ def test_the_reported_local_steps_are_the_batches_times_the_epochs_actually_run(
     reply, _ = run_train(cfg)
     assert reply.content["metrics"]["local-steps"] == 3 * len(trainloader)
     assert reply.content["metrics"]["local-steps"] > run_train(config())[0].content["metrics"]["local-steps"]
+
+
+# ------------------------------------------------------------------------------- initial loss
+def test_the_initial_loss_is_the_received_models_loss_on_the_local_training_data():
+    from defai.task import get_device
+    from defai.task import test as test_fn
+
+    cfg = config()
+    reply, _ = run_train(cfg, {"report-initial-loss": True})
+    model = build_model("synthetic")
+    model.load_state_dict(GLOBAL.to_torch_state_dict())
+    trainloader, _ = load_client_data(0, NUM_PARTITIONS, cfg)
+    expected, _ = test_fn(model, torch.utils.data.DataLoader(trainloader.dataset, batch_size=cfg["batch-size"]), get_device())
+    assert reply.content["metrics"]["initial-loss"] == pytest.approx(expected, rel=1e-5)
+    # it is the loss *before* training: higher than the mean loss seen while training
+    assert reply.content["metrics"]["initial-loss"] > reply.content["metrics"]["train_loss"]
+
+
+def test_the_initial_loss_is_only_measured_when_asked_for():
+    reply, _ = run_train(config())
+    assert "initial-loss" not in reply.content["metrics"]
