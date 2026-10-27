@@ -291,3 +291,21 @@ def test_lr_decay_must_be_in_zero_one(bad):
 
 def test_scaffold_and_others_inherit_the_decay():
     assert sent_lrs(Scaffold(lr_decay=0.9, **COMMON))[0] == pytest.approx([0.1, 0.09, 0.081, 0.0729])
+
+
+def test_strategies_can_require_a_client_metric_and_drop_replies_without_it(caplog):
+    import logging
+
+    class NeedsSteps(FedAvg):
+        required_metrics = ("local-steps",)
+
+    strategy = NeedsSteps(**COMMON)
+    messages, _ = configured(strategy)
+    with_steps = lambda m: good_reply(m, metrics=MetricRecord({"num-examples": 10, "local-steps": 5}))  # noqa: E731
+    bad = [good_reply(messages[0]),  # no local-steps
+           good_reply(messages[1], metrics=MetricRecord({"num-examples": 10, "local-steps": 0})),
+           good_reply(messages[2], metrics=MetricRecord({"num-examples": 10, "local-steps": float("nan")}))]
+    with caplog.at_level(logging.WARNING, logger="flwr"):
+        w, _ = aggregate(strategy, bad + [with_steps(messages[3])])
+    assert caplog.text.count("'local-steps' must be a positive finite number") == 3
+    np.testing.assert_allclose(w, 1.0)  # only the one valid reply took part

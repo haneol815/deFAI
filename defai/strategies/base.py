@@ -136,6 +136,8 @@ class FedAvg(Strategy):
     supports_dp = True
     #: ArrayRecords besides ``arrays`` that every train reply must contain.
     extra_reply_records: tuple[str, ...] = ()
+    #: MetricRecord entries (positive finite numbers) that every train reply must contain.
+    required_metrics: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -246,6 +248,10 @@ class FedAvg(Strategy):
             return f"'{self.weighted_by_key}' must be a positive finite number, got {weight!r}"
         if not train:
             return None
+        for key in self.required_metrics:
+            value = metrics.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value < math.inf:
+                return f"'{key}' must be a positive finite number, got {value!r}"
         if self.dp is not None and self.dp.adaptive and self.dp.side == "client":
             bit = metrics.get(KEY_UNCLIPPED_BIT)
             if isinstance(bit, bool) or bit not in (0, 1):

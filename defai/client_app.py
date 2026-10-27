@@ -141,6 +141,7 @@ def train(msg: Message, context: Context):
         "metrics": MetricRecord({
             "train_loss": train_loss,
             "num-examples": len(trainloader.dataset),
+            "local-steps": steps,  # optimiser steps taken; clients with more data take more (FedNova)
             **extra_metrics,
         }),
         **extra_records,

@@ -71,7 +71,7 @@ def test_reply_structure_and_metrics():
     assert list(reply.content["arrays"].keys()) == list(GLOBAL.keys())
     metrics = reply.content["metrics"]
     assert metrics["num-examples"] > 0 and np.isfinite(metrics["train_loss"])
-    assert set(metrics) == {"train_loss", "num-examples"}  # nothing algorithm-specific leaks in
+    assert set(metrics) == {"train_loss", "num-examples", "local-steps"}  # nothing algorithm-specific leaks in
     assert l2_norm(update_of(reply)) > 0
 
 
@@ -253,3 +253,11 @@ def test_dropout_follows_the_rate_and_is_fixed_by_seed_partition_and_round():
     assert decisions != other  # but not the same for another seed
     assert not any(client_app.dropped_out({**cfg, "dropout-rate": 0.0}, p, r) for p in range(40) for r in range(1, 51))
     assert all(client_app.dropped_out({**cfg, "dropout-rate": 1.0}, p, r) for p in range(5) for r in range(1, 6))
+
+
+def test_the_reported_local_steps_are_the_batches_times_the_epochs_actually_run():
+    cfg = config(**{"local-epochs": 3})
+    trainloader, _ = load_client_data(0, NUM_PARTITIONS, cfg)
+    reply, _ = run_train(cfg)
+    assert reply.content["metrics"]["local-steps"] == 3 * len(trainloader)
+    assert reply.content["metrics"]["local-steps"] > run_train(config())[0].content["metrics"]["local-steps"]
