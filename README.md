@@ -109,12 +109,19 @@ python scripts/run_grid.py --output-dir results/noniid --seeds 1 2 3 --num-super
   --base "partitioner='dirichlet' dirichlet-alpha=0.1 num-server-rounds=30" \
   --vary "strategy='fedavg'" "strategy='fedprox'" "strategy='scaffold'" "strategy='moon'"
 ```
-Every `--vary` fragment is added to `--base` (same `key=value` syntax as `--run-config`), `seed` and `output-dir` are
-set per run, and logs go to `<output-dir>/logs/`. The grid is resumable: runs whose results (same settings, same seed)
-are already in `--output-dir` are skipped, so an interrupted grid continues where it stopped (`--no-resume` repeats
-everything, `--dry-run` only prints the commands). `flwr run` exits with 0 even when the ServerApp fails, so a run counts
-as successful only if it wrote a `history.json`; the script exits with 1 if any run did not. It sets
-`FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1` for the runs unless `--install-deps` is given.
+Every `--vary` fragment is added to `--base` (same `key=value` syntax as `--run-config`); `seed` and `output-dir` are
+set per run, and logs go to `<output-dir>/logs/`. The grid keeps a manifest, `<output-dir>/grid.json`, mapping each
+finished run to its results. A run is identified by its complete run config (the `pyproject.toml` defaults plus the
+fragments and the seed) and `--num-supernodes`, so an interrupted grid continues where it stopped, while changing any
+of these, or `--no-resume`, runs the job again. The final comparison covers the runs of the invocation only.
+`--dry-run` only prints the commands.
+
+`flwr run` exits with 0 even when the ServerApp fails, so a run counts as successful only if it wrote a new
+`history.json`; the script exits with 1 if any run did not. `flwr run --stream` hands the run to a background
+SuperLink, so a run that exceeds `--timeout` (and a Ctrl-C) is stopped with `flwr stop`. Environment variables such as
+`FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1` (set for the runs unless `--install-deps` is given) and
+`DEFAI_DATA_DIR` are read by that SuperLink, which the first run starts and later ones reuse; stop it
+(`pkill -f flower-superlink`) to change them.
 
 ## Reading `history.json`
 One row per round (round 0 is the initial model), merged from three sources:
