@@ -9,6 +9,7 @@ KEY_C = "c"                  # SCAFFOLD server control variate (train message)
 KEY_C_DELTA = "c-delta"      # SCAFFOLD client control-variate change (train reply)
 STATE_SCAFFOLD_C = "scaffold-c"        # ClientApp state: this client's control variate
 STATE_MOON_PREVIOUS = "moon-previous"  # ClientApp state: this client's previous local model
+STATE_EF_RESIDUAL = "ef-residual"      # ClientApp state: update mass lost to compression (error feedback)
 
 
 def to_arrays(record: ArrayRecord) -> Arrays:

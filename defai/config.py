@@ -9,6 +9,7 @@ from logging import WARNING
 from flwr.supercore import log
 
 from defai.attacks import ATTACKS
+from defai.compression import METHODS
 from defai.strategies import STRATEGIES
 from defai.task import DATASETS
 
@@ -19,6 +20,7 @@ CHOICES = {
     "attack": ATTACKS,
     "dp": ("none", "fixed", "adaptive"),
     "dp-side": ("server", "client"),
+    "compression": METHODS,
 }
 
 # key -> (predicate, description)
@@ -46,6 +48,8 @@ RANGES = {
     "multikrum-select": (lambda v: v >= 1, ">= 1"),
     "num-malicious": (lambda v: v >= 0, ">= 0"),
     "dropout-rate": (lambda v: 0 <= v <= 1, "in [0, 1]"),
+    "compression-ratio": (lambda v: 0 < v <= 1, "in (0, 1]"),
+    "compression-bits": (lambda v: 2 <= v <= 16, "in [2, 16]"),
     "dp-noise-multiplier": (lambda v: v >= 0, ">= 0"),
     "dp-clip-norm": (lambda v: v > 0, "> 0"),
     "dp-delta": (lambda v: 0 < v < 1, "in (0, 1)"),

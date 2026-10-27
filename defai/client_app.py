@@ -4,7 +4,8 @@ The server decides which federated algorithm the client runs by what it puts int
 train message: ``proximal-mu`` (FedProx), a ``c`` control variate (SCAFFOLD),
 ``moon-mu`` (MOON), ``report-initial-loss`` (q-FedAvg) and ``dp-clip-norm`` (client-side
 DP clipping). Algorithms that need memory between rounds keep it in ``context.state``.
-The run config adds simulated misbehaviour: ``attack`` and ``dropout-rate``.
+The run config adds simulated misbehaviour (``attack``, ``dropout-rate``) and update
+compression (``compression``), applied last, just before the update is sent.
 """
 
 import copy
@@ -19,11 +20,14 @@ from flwr.common.constant import ErrorCode
 from defai.aggregation import l2_norm
 from defai.attacks import is_malicious, poison_update
 from defai.privacy.dp import KEY_ADAPTIVE, KEY_CLIP_NORM, KEY_UNCLIPPED_BIT, clip_to_norm
+from defai.compression import compress, compress_with_feedback, relative_error
 from defai.records import (
     KEY_C,
     KEY_C_DELTA,
+    STATE_EF_RESIDUAL,
     STATE_MOON_PREVIOUS,
     STATE_SCAFFOLD_C,
+    record_bytes,
     to_arrays,
     to_record,
 )
@@ -143,6 +147,24 @@ def train(msg: Message, context: Context):
         local_arrays = {k: global_arrays[k] + clipped[k] for k in local_arrays}
         if config[KEY_ADAPTIVE]:
             extra_metrics[KEY_UNCLIPPED_BIT] = int(not was_clipped)
+
+    # Compression is the last step before sending (the server still enforces any DP clipping bound)
+    if cfg["compression"] != "none":
+        update = {k: local_arrays[k] - global_arrays[k] for k in local_arrays}
+        options_c = dict(
+            ratio=cfg["compression-ratio"],
+            bits=cfg["compression-bits"],
+            rng=np.random.default_rng([cfg["seed"], partition_id, config["server-round"], 2]),
+        )
+        if cfg["error-feedback"]:
+            residual = to_arrays(context.state[STATE_EF_RESIDUAL]) if STATE_EF_RESIDUAL in context.state else None
+            decoded, nbytes, residual = compress_with_feedback(update, residual, cfg["compression"], **options_c)
+            context.state[STATE_EF_RESIDUAL] = to_record(residual)
+        else:
+            decoded, nbytes = compress(update, cfg["compression"], **options_c)
+        local_arrays = {k: (global_arrays[k] + decoded[k]).astype(global_arrays[k].dtype) for k in local_arrays}
+        extra_metrics["compression-error"] = relative_error(update, decoded)
+        extra_metrics["upload-bytes"] = nbytes + sum(record_bytes(r) for r in extra_records.values())
 
     content = RecordDict({
         "arrays": to_record(local_arrays),

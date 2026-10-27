@@ -99,3 +99,11 @@ def test_training_survives_clients_that_drop_out_and_the_traffic_shows_it(tmp_pa
     # missing replies mean less upload than download: the accounting sees the dropouts
     assert any(row["comm-mb-up"] < row["comm-mb-down"] for row in trained)
     assert all(row["comm-mb-up"] <= row["comm-mb-down"] for row in trained)
+
+
+def test_compressed_uploads_are_accounted_at_their_real_size_and_training_still_learns(tmp_path):
+    _, summary, _ = run(tmp_path, compression="topk", **{"compression-ratio": 0.2, "error-feedback": True, "num-server-rounds": 3})
+    rounds = summary["history"][1:]
+    assert all(row["comm-mb-up"] < 0.5 * row["comm-mb-down"] for row in rounds)   # ~0.4 bytes/param vs ~4 dense
+    assert all(0.0 < row["compression-error"] < 1.0 for row in rounds)
+    assert summary["history"][-1]["test_acc"] > summary["history"][0]["test_acc"] + 0.1

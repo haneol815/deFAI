@@ -282,3 +282,74 @@ def test_the_initial_loss_is_the_received_models_loss_on_the_local_training_data
 def test_the_initial_loss_is_only_measured_when_asked_for():
     reply, _ = run_train(config())
     assert "initial-loss" not in reply.content["metrics"]
+
+
+# ---------------------------------------------------------------------------------- compression
+from defai.compression import topk  # noqa: E402
+from defai.records import STATE_EF_RESIDUAL  # noqa: E402
+
+
+def flat(update):
+    return np.concatenate([v.ravel() for v in update.values()])
+
+
+def test_without_compression_nothing_about_it_is_reported():
+    metrics = run_train(config())[0].content["metrics"]
+    assert "upload-bytes" not in metrics and "compression-error" not in metrics
+
+
+def test_topk_sends_a_sparse_update_made_of_the_largest_entries_and_reports_the_real_cost():
+    honest = update_of(run_train(config())[0])
+    reply, ctx = run_train(config(compression="topk", **{"compression-ratio": 0.05}))
+    sent = update_of(reply)
+    n = flat(honest).size
+    assert np.count_nonzero(flat(sent)) <= int(np.ceil(0.05 * n))
+    expected, nbytes = topk(honest, 0.05)  # the same training, then top-k of its update
+    for k in honest:
+        np.testing.assert_allclose(sent[k], expected[k], atol=1e-6)
+    metrics = reply.content["metrics"]
+    assert metrics["upload-bytes"] == nbytes == 8 * int(np.ceil(0.05 * n))
+    assert 0.0 < metrics["compression-error"] < 1.0
+    assert STATE_EF_RESIDUAL not in ctx.state  # error feedback is opt-in
+
+
+def test_quantization_sends_a_dense_update_that_is_close_and_cheaper():
+    honest = update_of(run_train(config())[0])
+    n = flat(honest).size
+    errors, costs = {}, {}
+    for bits in (4, 8):
+        reply, _ = run_train(config(compression="quantize", **{"compression-bits": bits}))
+        sent = update_of(reply)
+        assert any(not np.array_equal(sent[k], honest[k]) for k in honest)  # lossy, and dense (not sparse)
+        errors[bits] = reply.content["metrics"]["compression-error"]
+        costs[bits] = reply.content["metrics"]["upload-bytes"]
+    # update tensors are heavy-tailed (a few large entries set the per-tensor scale), so 8 bits are close
+    # but not lossless; fewer bits cost proportionally less and are clearly worse
+    assert errors[8] < 0.06 and errors[4] > 4 * errors[8]
+    assert costs[8] == pytest.approx(0.25 * 4 * n, rel=0.01) and costs[4] == pytest.approx(0.125 * 4 * n, rel=0.01)
+
+
+def test_error_feedback_keeps_a_residual_in_the_client_state_and_uses_it_next_round():
+    cfg = config(compression="topk", **{"compression-ratio": 0.05, "error-feedback": True})
+    first, ctx = run_train(cfg)
+    residual = to_arrays(ctx.state[STATE_EF_RESIDUAL])
+    honest = update_of(run_train(config())[0])
+    # residual = (update) - (what was sent): the mass top-k dropped
+    for k in honest:
+        np.testing.assert_allclose(residual[k], honest[k] - update_of(first)[k], atol=1e-5)
+    second, _ = run_train(cfg, ctx=ctx)                       # the same client, the remembered residual
+    fresh, _ = run_train(cfg)                                 # a client without state
+    assert any(not np.allclose(update_of(second)[k], update_of(fresh)[k]) for k in honest)
+
+
+def test_the_upload_cost_of_a_scaffold_client_includes_its_uncompressed_control_variate():
+    plain, _ = run_train(config(compression="topk", **{"compression-ratio": 0.05}))
+    scaffold, _ = run_train(config(compression="topk", **{"compression-ratio": 0.05}), **{KEY_C: zero_control_variate()})
+    extra = scaffold.content["metrics"]["upload-bytes"] - plain.content["metrics"]["upload-bytes"]
+    assert extra == sum(len(a.data) for a in scaffold.content[KEY_C_DELTA].values())
+
+
+def test_a_dropped_client_does_not_touch_its_error_feedback_state():
+    cfg = config(compression="topk", **{"compression-ratio": 0.05, "error-feedback": True, "dropout-rate": 1.0})
+    reply, ctx = run_train(cfg)
+    assert reply.has_error() and STATE_EF_RESIDUAL not in ctx.state

@@ -70,6 +70,11 @@ multikrum-select = 3        # multikrum: number of updates averaged
 attack = "none"             # none | label-flip | sign-flip | gaussian
 num-malicious = 0
 attack-scale = 1.0          # sign-flip: multiplier; gaussian: std of the replacement update
+# communication: lossy compression of the client update (simulated; the cost is reported in comm-mb-up)
+compression = "none"        # none | topk | quantize
+compression-ratio = 0.1     # topk: fraction of the update entries that are kept
+compression-bits = 8        # quantize: bits per entry (2..16), stochastic rounding
+error-feedback = false      # carry what compression lost into the client's next update
 # client failures
 dropout-rate = 0.0          # probability that a sampled client does not answer a train message
 # differential privacy (mean-based strategies only)
