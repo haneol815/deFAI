@@ -108,3 +108,34 @@ class RegistrationOrderGrid(FakeGrid):
         np.random.default_rng(0).shuffle(shuffled)  # the server must not rely on delivery order either
         position = {n: i for i, n in enumerate(self.nodes)}
         return [NodeInfo(node_id=n, registered_at=f"2026-01-01T00:00:00.{position[n]:06d}+00:00") for n in shuffled]
+
+
+class InProcessGrid(FakeGrid):
+    """Routes messages to the real ClientApp functions, one persistent Context per node.
+
+    Like the simulation engine: node ``i`` gets ``partition-id = i`` and keeps its ``state`` between
+    rounds. This runs the whole stack (ServerApp, strategy, ClientApp, model, data) without Flower's runtime.
+    """
+
+    def __init__(self, num_nodes, run_config):
+        from flwr.app import Context, RecordDict
+
+        super().__init__(num_nodes, self._dispatch)
+        self.contexts = {
+            node: Context(
+                run_id=1,
+                node_id=node,
+                node_config={"partition-id": i, "num-partitions": num_nodes},
+                state=RecordDict(),
+                run_config=run_config,
+            )
+            for i, node in enumerate(self.nodes)
+        }
+
+    def _dispatch(self, msg):
+        from defai import client_app
+
+        context = self.contexts[msg.metadata.dst_node_id]
+        if msg.metadata.message_type == MessageType.EVALUATE:
+            return client_app.evaluate(msg, context)
+        return client_app.train(msg, context)
