@@ -39,6 +39,7 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 ├── tests/                    # pytest suite (no network or GPU needed)
 ├── scripts/plot.py           # Metric-per-round plotting
 ├── scripts/compare.py        # Results table (mean ± std over seeds, rounds-to-target, epsilon)
+├── scripts/partition_stats.py # Per-client class counts of a partitioning (+ heat map)
 ├── docs/report.md            # Report template
 └── results/                  # Experiment outputs (git-ignored)
 ```
@@ -100,6 +101,24 @@ for seed in 1 2 3; do
 done
 python scripts/compare.py results/*/history.json
 ```
+
+## Reading `history.json`
+One row per round (round 0 is the initial model), merged from three sources:
+
+| key | meaning |
+|---|---|
+| `test_acc`, `test_loss` | centralized evaluation of the global model on the full test set |
+| `eval_acc`, `eval_loss` | federated evaluation: example-weighted mean over the sampled clients' held-out data |
+| `eval_acc_min`, `eval_acc_max`, `eval_acc_std` | the same accuracy over clients, **unweighted**: the worst and best client and their spread. A good mean with a low minimum means the model fails some clients |
+| `train_loss` | mean task loss of the local training (without the FedProx / MOON regularisers) |
+| `comm-mb-down`, `comm-mb-up`, `comm-mb-total` | training traffic in MiB: model sent to the sampled clients, what came back, and the running total of the run (evaluation messages not counted). SCAFFOLD pays twice per direction for its control variates |
+| `dp-*` | differential-privacy bookkeeping, see [Differential privacy](#differential-privacy) |
+
+To choose a `dirichlet-alpha`, look at the split it produces:
+```bash
+python scripts/partition_stats.py --partitioner dirichlet --alpha 0.1 --num-partitions 10 --plot results/partition.png
+```
+It prints the per-client class counts and the mean share of each client's most frequent class (0.1 = uniform split of 10 classes).
 
 ## Algorithms
 Select with `strategy='<name>'`. Every strategy is implemented in `defai/strategies/` on top of Flower's abstract
