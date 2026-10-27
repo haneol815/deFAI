@@ -156,7 +156,7 @@ Select with `strategy='<name>'`. Every strategy is implemented in `defai/strateg
 | `moon` | Model-contrastive loss vs. global and previous local representation | `moon-mu`, `moon-temperature` | Li et al., 2021 |
 | `scaffold` | Control variates correct client drift (option II) | `learning-rate`, `local-epochs` | Karimireddy et al., 2020 |
 | `fednova` | Normalised averaging: removes the bias from clients doing unequal numbers of local steps | – | Wang et al., 2020 |
-| `qfedavg` | Weights clients by their loss to improve the worst client | `qfedavg-q` | Li et al., 2020 |
+| `qfedavg` | Weights clients by their loss to improve the worst client | `qfedavg-q`, `qfedavg-lipschitz` | Li et al., 2020 |
 | `fedavgm` | Server momentum | `server-momentum`, `server-learning-rate` | Hsu et al., 2019 |
 | `fedadagrad` `fedadam` `fedyogi` | Adaptive server optimisers | `fedopt-learning-rate`, `beta-1`, `beta-2`, `tau` | Reddi et al., 2021 |
 | `fedmedian` | Coordinate-wise median | – | Yin et al., 2018 |
@@ -167,6 +167,11 @@ Select with `strategy='<name>'`. Every strategy is implemented in `defai/strateg
 `fednova` and `qfedavg` need two extra numbers from the clients, which they report on their own: `local-steps`
 (for FedNova) and `initial-loss`, the loss of the received model before local training (for q-FedAvg). Neither is
 combined with differential privacy: the per-client rescaling and the loss weights are not bounded by clipping.
+
+q-FedAvg's update is divided by `Σ_k [q·F_k^(q-1)·‖L·δ_k‖² + L·F_k^q]` with `L = 1/lr` (`qfedavg-lipschitz` replaces `L`; 0
+keeps `1/lr`). With a small client learning rate `L` is large, the first term can dominate, and the step becomes much
+smaller than FedAvg's. The history therefore has `qfedavg-step-scale`, the factor `Σ L·F_k^q / Σ h_k` (1 = the step is
+not shrunk; it is 1 for `q = 0`), so a q-FedAvg run that learns slowly can be diagnosed.
 
 SCAFFOLD and MOON keep per-client state (the client's control variate / previous local model) in
 `context.state`, which the simulation engine preserves between rounds.
