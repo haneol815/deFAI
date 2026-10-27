@@ -53,7 +53,7 @@ def test_hyperparameters_reach_the_strategies():
 
 
 def test_dp_is_rejected_for_strategies_that_cannot_support_it():
-    for name in ("scaffold", "fedmedian", "fedtrimmedavg", "krum", "multikrum", "bulyan"):
+    for name in ("scaffold", "fednova", "fedmedian", "fedtrimmedavg", "krum", "multikrum", "bulyan"):
         with pytest.raises(ValueError, match="differential privacy"):
             build_strategy(default_config(strategy=name, dp="fixed"))
     build_strategy(default_config(strategy="fedadam", dp="adaptive"))  # allowed

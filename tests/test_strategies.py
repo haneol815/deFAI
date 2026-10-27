@@ -12,6 +12,7 @@ from defai.strategies import (
     FedAvg,
     FedAvgM,
     FedMedian,
+    FedNova,
     FedProx,
     FedTrimmedAvg,
     FedYogi,
@@ -380,3 +381,50 @@ def test_integer_parameters_do_not_drift_by_one_when_all_clients_agree():
         arrays, _ = strategy.aggregate_train(1, replies)
         steps = arrays["steps"].numpy()
         assert steps.dtype == np.int64 and steps[0] == 258, (trial, steps)
+
+
+# ------------------------------------------------------------------------------------ FedNova
+def two_clients(steps, lr=0.01):
+    """Client 1 wants +1, client 2 wants -1 (true optimum 0); they take ``steps`` local steps."""
+    targets = {1: np.array([1.0]), 2: np.array([-1.0])}
+    return QuadraticClients(targets, lr=lr, steps=steps)
+
+
+def fixed_point(strategy, steps, rounds=300):
+    w, _, _ = run_strategy(strategy, two_clients(steps), 2, rounds, dim=1)
+    return float(w[0])
+
+
+def test_fednova_equals_fedavg_when_every_client_takes_the_same_number_of_steps():
+    common = dict(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
+    nova, _, _ = run(FedNova(**common), rounds=5)
+    avg, _, _ = run(FedAvg(**common), rounds=5)
+    np.testing.assert_allclose(nova, avg, atol=1e-6)
+
+
+def test_fednova_matches_the_formula_for_unequal_steps_and_weights():
+    steps = {n: 2 * n for n in TARGETS}  # 2, 4, ..., 16
+    sizes = {n: 10 * n for n in TARGETS}
+    clients = QuadraticClients(TARGETS, lr=0.05, steps=steps, num_examples=sizes)
+    w, _, _ = run_strategy(FedNova(**COMMON), clients, N, rounds=1, dim=DIM)
+    p = np.array([sizes[n] for n in TARGETS], float)
+    p /= p.sum()
+    tau = np.array([steps[n] for n in TARGETS], float)
+    deltas = np.stack([TARGETS[n] * (1 - 0.95 ** steps[n]) for n in TARGETS])  # local GD from w=0 on 0.5*||w-t||^2
+    expected = (p @ tau) * np.einsum("i,id->d", p / tau, deltas)
+    np.testing.assert_allclose(w, expected, rtol=1e-4, atol=1e-6)
+
+
+def test_fednova_removes_the_bias_that_unequal_local_steps_put_into_fedavg():
+    common = dict(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
+    steps = {1: 1, 2: 30}  # the client that wants -1 does 30 times more work
+    biased = fixed_point(FedAvg(**common), steps)
+    corrected = fixed_point(FedNova(**common), steps)
+    assert biased < -0.8      # FedAvg settles next to the busy client's optimum instead of the true one (0)
+    assert abs(corrected) < 0.15
+
+
+def test_fednova_rejects_dp_and_needs_the_step_count():
+    with pytest.raises(ValueError):
+        FedNova(dp=FixedClipping(1.0, 1.0))
+    assert FedNova.required_metrics == ("local-steps",)

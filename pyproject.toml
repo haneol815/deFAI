@@ -35,7 +35,7 @@ clientapp = "defai.client_app:app"
 [tool.flwr.app.config]
 # federation
 num-server-rounds = 10
-# fedavg | fedprox | moon | scaffold | fedavgm | fedadagrad | fedadam | fedyogi
+# fedavg | fedprox | moon | scaffold | fednova | fedavgm | fedadagrad | fedadam | fedyogi
 # | fedmedian | fedtrimmedavg | krum | multikrum | bulyan
 strategy = "fedavg"
 fraction-train = 0.5        # fraction of SuperNodes sampled per round

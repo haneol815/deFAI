@@ -8,6 +8,8 @@ puts into the train message (``proximal-mu``, ``moon-mu``, the ``c`` control var
 * SCAFFOLD: Karimireddy et al., "SCAFFOLD: Stochastic Controlled Averaging for
             Federated Learning", ICML 2020 (option II control variates).
 * MOON:     Li et al., "Model-Contrastive Federated Learning", CVPR 2021.
+* FedNova:  Wang et al., "Tackling the Objective Inconsistency Problem in Heterogeneous
+            Federated Optimization", NeurIPS 2020.
 """
 
 from logging import INFO
@@ -102,3 +104,32 @@ class Scaffold(FedAvg):
             self._c[k] = self._c[k] + share * dc.astype(np.float64)
         log(INFO, "\tSCAFFOLD: |c| = %.4g", float(np.sqrt(sum(np.sum(c**2) for c in self._c.values()))))
         return weighted_mean([u.delta for u in updates], uniform)
+
+
+class FedNova(FedAvg):
+    """Normalised averaging: remove the bias that unequal numbers of local steps introduce.
+
+    Clients with more data take more local steps, and plain averaging then converges to a
+    minimiser of a *reweighted* objective, not of the one the data weights define (the paper's
+    "objective inconsistency"). FedNova divides every update by its client's step count
+    ``tau_i`` and rescales the average by the effective number of steps::
+
+        delta = tau_eff * sum_i p_i * delta_i / tau_i,    tau_eff = sum_i p_i * tau_i
+
+    with ``p_i`` the data-size weights. For vanilla local SGD (no momentum) the paper's
+    normalising factor ``||a_i||_1`` is exactly ``tau_i``. With equal step counts this is FedAvg.
+    Clients report ``tau_i`` as ``local-steps``. Not compatible with DP: the per-client rescaling
+    depends on the data size, so clipping does not bound its influence.
+    """
+
+    name = "fednova"
+    supports_dp = False
+    required_metrics = ("local-steps",)
+
+    def aggregate_updates(self, updates: list[ClientUpdate]) -> Arrays:
+        weights = np.asarray([u.weight for u in updates], dtype=np.float64)
+        steps = np.asarray([u.metrics["local-steps"] for u in updates], dtype=np.float64)
+        tau_eff = float(weights @ steps / weights.sum())
+        rescaled = [{k: v * (tau_eff / tau) for k, v in u.delta.items()} for u, tau in zip(updates, steps)]
+        log(INFO, "\tFedNova: local steps %s, effective %.2f", steps.astype(int).tolist(), tau_eff)
+        return weighted_mean(rescaled, weights.tolist())

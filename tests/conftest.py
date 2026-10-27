@@ -56,20 +56,21 @@ class QuadraticClients:
         if scaffold:
             c = to_arrays(content["c"])["w"].astype(np.float64)
             c_i = self.control.get(node, np.zeros_like(c))
+        steps = self.steps[node] if isinstance(self.steps, dict) else self.steps
         y = w.copy()
-        for _ in range(self.steps):
+        for _ in range(steps):
             grad = (y - t) + mu * (y - w)
             if scaffold:
                 grad = grad - c_i + c
             y = y - self.lr * grad
         reply = {"arrays": to_record({"w": y.astype(np.float32)})}
         if scaffold:
-            c_new = c_i - c + (w - y) / (self.steps * self.lr)
+            c_new = c_i - c + (w - y) / (steps * self.lr)
             self.control[node] = c_new
             reply["c-delta"] = to_record({"w": (c_new - c_i).astype(np.float32)})
         if node in self.bad:
             reply["arrays"] = to_record({"w": np.full_like(y, 1e3, dtype=np.float32)})
-        metrics = {"train_loss": float(0.5 * np.sum((w - t) ** 2)), "num-examples": self.num_examples[node]}
+        metrics = {"train_loss": float(0.5 * np.sum((w - t) ** 2)), "num-examples": self.num_examples[node], "local-steps": steps}
         reply["metrics"] = MetricRecord(metrics)
         return Message(content=RecordDict(reply), reply_to=msg)
 
