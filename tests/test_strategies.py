@@ -456,6 +456,55 @@ def test_qfedavg_one_round_matches_the_paper_formula():
     np.testing.assert_allclose(w, expected, rtol=1e-4)
 
 
+def qfedavg_expected(q, lipschitz, lr, steps):
+    """Paper formula for one round from w = 0: (update, step scale)."""
+    F = np.array([0.5 * np.sum(TARGETS[n] ** 2) for n in TARGETS]) + 1e-10
+    delta = np.stack([TARGETS[n] * (1 - (1 - lr) ** steps) for n in TARGETS])
+    h = q * F ** (q - 1) * lipschitz**2 * np.sum(delta**2, axis=1) + lipschitz * F**q
+    return lipschitz * np.einsum("i,id->d", F**q, delta) / h.sum(), np.sum(lipschitz * F**q) / h.sum()
+
+
+def test_qfedavg_lipschitz_constant_replaces_one_over_lr_and_moves_the_step_size():
+    q, lr, steps = 1.0, 0.1, 5
+    results = {}
+    for lipschitz in (0.0, 10.0, 2.0):  # 0 means the default 1 / lr = 10
+        clients = QuadraticClients(TARGETS, lr=lr, steps=steps)
+        w, _, _ = run_strategy(QFedAvg(q=q, lipschitz=lipschitz, **COMMON), clients, N, rounds=1, dim=DIM)
+        expected, _ = qfedavg_expected(q, lipschitz or 1 / lr, lr, steps)
+        np.testing.assert_allclose(w, expected, rtol=1e-4)
+        results[lipschitz] = w
+    np.testing.assert_allclose(results[0.0], results[10.0])
+    # a smaller L divides by less, so the step is larger
+    assert np.linalg.norm(results[2.0]) > 2 * np.linalg.norm(results[10.0])
+
+
+def test_qfedavg_reports_how_much_its_normalisation_shrinks_the_step():
+    q, lr, steps = 1.0, 0.1, 5
+    for q_value in (q, 0.0):
+        clients = QuadraticClients(TARGETS, lr=lr, steps=steps)
+        _, result, _ = run_strategy(QFedAvg(q=q_value, **COMMON), clients, N, rounds=1, dim=DIM)
+        scale = result.train_metrics_clientapp[1]["qfedavg-step-scale"]
+        assert scale == pytest.approx(qfedavg_expected(q_value, 1 / lr, lr, steps)[1], rel=1e-6)
+    assert scale == pytest.approx(1.0)  # q = 0: nothing shrinks the uniform average
+    _, result, _ = run_strategy(FedAvg(**COMMON), QuadraticClients(TARGETS, lr=lr, steps=steps), N, rounds=1, dim=DIM)
+    assert "qfedavg-step-scale" not in result.train_metrics_clientapp[1]  # only q-FedAvg reports it
+
+
+def test_extra_round_metrics_of_a_strategy_are_reported_for_that_round_only():
+    class Once(FedAvg):
+        calls = 0
+
+        def aggregate_updates(self, updates):
+            self.calls += 1
+            if self.calls == 1:
+                self._round_metrics["only-in-round-one"] = 3.0
+            return super().aggregate_updates(updates)
+
+    _, result, _ = run(Once(**COMMON), rounds=2)
+    assert result.train_metrics_clientapp[1]["only-in-round-one"] == 3.0
+    assert "only-in-round-one" not in result.train_metrics_clientapp[2]
+
+
 def test_qfedavg_trades_mean_loss_for_a_better_worst_client():
     targets = {1: np.array([-1.0]), 2: np.array([-1.0]), 3: np.array([-1.0]), 4: np.array([4.0])}  # one outlier client
     common = dict(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
@@ -480,6 +529,8 @@ def test_qfedavg_asks_for_the_initial_loss_with_the_decayed_learning_rate():
 def test_qfedavg_validation_and_dp_exclusion():
     with pytest.raises(ValueError):
         QFedAvg(q=-0.1)
+    with pytest.raises(ValueError, match="lipschitz"):
+        QFedAvg(lipschitz=-1.0)
     with pytest.raises(ValueError):
         QFedAvg(dp=FixedClipping(1.0, 1.0))
     assert QFedAvg.required_metrics == ("initial-loss",)

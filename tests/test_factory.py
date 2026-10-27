@@ -49,7 +49,9 @@ def test_hyperparameters_reach_the_strategies():
     mk = build_strategy({**cfg, "strategy": "multikrum", "num-byzantine": 2, "multikrum-select": 4})
     assert (mk.num_byzantine, mk.num_select) == (2, 4)
     assert build_strategy({**cfg, "strategy": "krum"}).num_select == 1
-    assert build_strategy({**cfg, "strategy": "qfedavg", "qfedavg-q": 2.5}).q == 2.5
+    qfedavg = build_strategy({**cfg, "strategy": "qfedavg", "qfedavg-q": 2.5, "qfedavg-lipschitz": 7.0})
+    assert (qfedavg.q, qfedavg.lipschitz) == (2.5, 7.0)
+    assert build_strategy({**cfg, "strategy": "qfedavg"}).lipschitz == 0.0  # default: 1 / lr
     assert build_strategy({**cfg, "strategy": "fedtrimmedavg", "trim-ratio": 0.1}).beta == 0.1
 
 

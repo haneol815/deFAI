@@ -55,6 +55,7 @@ proximal-mu = 0.01          # fedprox: weight of the proximal term
 moon-mu = 1.0               # moon: weight of the contrastive loss
 moon-temperature = 0.5      # moon: softmax temperature
 qfedavg-q = 0.1             # qfedavg: fairness exponent (0 = uniform average, larger = favour the worst clients)
+qfedavg-lipschitz = 0.0     # qfedavg: L in the step-size normalisation (0 = 1 / client learning rate; smaller = larger steps)
 # server optimisation
 server-learning-rate = 1.0  # fedavg / fedprox / moon / scaffold / robust rules: scales the aggregated update
 server-momentum = 0.9       # fedavgm

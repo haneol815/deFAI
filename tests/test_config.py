@@ -35,6 +35,7 @@ def test_default_config_is_valid():
         ({"dropout-rate": 1.5}, "dropout-rate"),
         ({"lr-decay": 0.0}, "lr-decay"),
         ({"qfedavg-q": -1.0}, "qfedavg-q"),
+        ({"qfedavg-lipschitz": -1.0}, "qfedavg-lipschitz"),
         ({"compression": "gzip"}, "compression"),
         ({"personalize-epochs": -1}, "personalize-epochs"),
         ({"compression-ratio": 0.0}, "compression-ratio"),

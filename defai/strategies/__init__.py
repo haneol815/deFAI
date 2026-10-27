@@ -65,7 +65,7 @@ def build_strategy(cfg):
         {
             "fedprox": dict(proximal_mu=cfg["proximal-mu"]),
             "moon": dict(mu=cfg["moon-mu"], temperature=cfg["moon-temperature"]),
-            "qfedavg": dict(q=cfg["qfedavg-q"]),
+            "qfedavg": dict(q=cfg["qfedavg-q"], lipschitz=cfg["qfedavg-lipschitz"]),
             "fedavgm": dict(momentum=cfg["server-momentum"]),
             "fedadagrad": dict(beta_1=cfg["beta-1"], beta_2=cfg["beta-2"], tau=cfg["tau"]),
             "fedadam": dict(beta_1=cfg["beta-1"], beta_2=cfg["beta-2"], tau=cfg["tau"]),

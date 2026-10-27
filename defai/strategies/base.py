@@ -169,6 +169,7 @@ class FedAvg(Strategy):
         self._num_sampled = 0               # clients asked to train in the current round
         self._population = 0                # clients connected in the current round
         self._budget_warned = False
+        self._round_metrics: dict[str, float] = {}  # strategies may report extra numbers for the round here
 
     # ------------------------------------------------------------------ logging
     def summary(self) -> None:
@@ -323,6 +324,7 @@ class FedAvg(Strategy):
         # Replies arrive in arbitrary order; aggregate in a fixed one so float sums are reproducible
         valid.sort(key=lambda m: self._rank.get(m.metadata.src_node_id, len(self._rank)))
         updates = self.select_updates([self._to_update(m) for m in valid])
+        self._round_metrics = {}
 
         dp_metrics: dict = {}
         if self.dp is not None:
@@ -339,6 +341,7 @@ class FedAvg(Strategy):
             metrics.pop(KEY_UNCLIPPED_BIT, None)  # their exact mean is the clipped count the DP noise protects
         metrics.pop(KEY_UPLOAD_BYTES, None)
         metrics.update(dp_metrics)
+        metrics.update(self._round_metrics)
         metrics.update(self._communication(valid))
         return to_record(new_global), MetricRecord(metrics)
 

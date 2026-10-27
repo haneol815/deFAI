@@ -148,6 +148,10 @@ class QFedAvg(FedAvg):
 
     ``q = 0`` is the uniform average (FedAvg with equal weights); a larger ``q`` trades mean accuracy for
     a better worst client. The update is already scaled, so ``server_learning_rate`` should stay 1.
+    The ``||L * delta_k||^2`` term in ``h_k`` shrinks the step, more the larger ``L * ||delta_k||^2`` is;
+    ``qfedavg-step-scale`` in the history is the factor ``sum_k L * F_k^q / sum_k h_k`` (1 = no shrinking,
+    which is the case for ``q = 0``). ``lipschitz`` replaces the default ``L = 1 / lr``, the one knob that
+    moves the step size (the paper treats ``L`` as a hyperparameter).
     Clients report ``F_k`` as ``initial-loss`` (measured before training, on request). Not compatible
     with DP: the weights depend on private losses.
     """
@@ -156,11 +160,14 @@ class QFedAvg(FedAvg):
     supports_dp = False
     required_metrics = ("initial-loss",)
 
-    def __init__(self, *, q: float = 0.1, **kwargs) -> None:
+    def __init__(self, *, q: float = 0.1, lipschitz: float = 0.0, **kwargs) -> None:
         super().__init__(**kwargs)
         if q < 0:
             raise ValueError("q must be non-negative")
+        if lipschitz < 0:
+            raise ValueError("lipschitz must be non-negative (0 = 1 / client learning rate)")
         self.q = q
+        self.lipschitz = lipschitz
         self._client_lr = 0.0
 
     def _extend_train_config(self, server_round: int, config: ConfigRecord) -> None:
@@ -168,7 +175,7 @@ class QFedAvg(FedAvg):
         self._client_lr = float(config["lr"])  # already decayed for this round
 
     def aggregate_updates(self, updates: list[ClientUpdate]) -> Arrays:
-        lipschitz = 1.0 / self._client_lr
+        lipschitz = self.lipschitz or 1.0 / self._client_lr
         losses = np.asarray([u.metrics["initial-loss"] for u in updates], dtype=np.float64) + 1e-10
         numerator = {k: np.zeros_like(v) for k, v in updates[0].delta.items()}
         denominator = 0.0
@@ -177,8 +184,9 @@ class QFedAvg(FedAvg):
                 numerator[k] += lipschitz * loss**self.q * v
             sq_norm = sum(float(np.sum(np.square(v))) for v in u.delta.values())
             denominator += self.q * loss ** (self.q - 1) * lipschitz**2 * sq_norm + lipschitz * loss**self.q
+        self._round_metrics["qfedavg-step-scale"] = float(np.sum(lipschitz * losses**self.q) / denominator)
         return {k: v / denominator for k, v in numerator.items()}
 
     def summary(self) -> None:
         super().summary()
-        log(INFO, "\t└──> q-FedAvg: q=%s", self.q)
+        log(INFO, "\t└──> q-FedAvg: q=%s, L=%s", self.q, self.lipschitz or "1/lr")
