@@ -52,6 +52,11 @@ python scripts/compare.py results/fmnist_noniid/*/history.json --tail 3 --extra 
 (`rounds to 0.6` is the first round whose accuracy reached 0.6, averaged over the runs that did; `comm-mb-total` is the
 training traffic of the whole run in MiB.)
 
+![Test accuracy per round, mean ± std over two seeds](figures/e1_noniid.png)
+
+`python scripts/plot.py results/fmnist_noniid/*/history.json --group -o docs/figures/e1_noniid.png`: the bands of the
+algorithms overlap almost everywhere, FedProx lies on top of FedAvg, and only q-FedAvg is below.
+
 What can and cannot be concluded:
 
 - **FedAvg, FedProx, FedNova, MOON and SCAFFOLD are not separated by these runs.** Their last-3 means lie between
