@@ -62,6 +62,23 @@ def test_compare_adds_columns_for_any_history_key(tmp_path, capsys):
     assert (tmp_path / "t.csv").read_text().splitlines()[0].endswith(",comm-mb-total")
 
 
+def test_compare_tail_averages_the_last_rounds(tmp_path, capsys):
+    compare = load_script("compare")
+    paths = [
+        write_run(tmp_path, "a0", [0.1, 0.9, 0.5, 0.7], seed=0),   # last three: 0.9 0.5 0.7 -> 0.7
+        write_run(tmp_path, "a1", [0.1, 0.3, 0.5, 0.9], seed=1),   # last three: 0.3 0.5 0.9 -> 0.5667
+    ]
+    row = compare.summarise(paths, 0.9, tail=3)[0]
+    assert row["tail"] == "0.633 ± 0.094" and row["final"] == "0.800 ± 0.141"
+    assert compare.summarise(paths, 0.9)[0]["tail"] == "-"  # off by default
+    assert compare.summarise(paths, 0.9, tail=10)[0]["tail"] == "0.500 ± 0.071"  # shorter runs: all four rounds (0.55 and 0.45)
+    compare.main([*paths, "--tail", "2"])
+    header = capsys.readouterr().out.splitlines()[0].split()
+    assert header[:5] == ["run", "runs", "final", "acc", "last-2"] and "mean" in header
+    compare.main(paths)
+    assert "last-" not in capsys.readouterr().out
+
+
 def test_compare_can_print_a_markdown_table(tmp_path, capsys):
     compare = load_script("compare")
     path = write_run(tmp_path, "a", [0.1, 0.8], columns={"eval_acc_min": [0.0, 0.5]})

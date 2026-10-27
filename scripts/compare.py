@@ -6,10 +6,13 @@ runs show mean ± std over seeds.
 usage: python scripts/compare.py results/*/history.json
        python scripts/compare.py results/*/history.json --target 0.95 --csv table.csv
        python scripts/compare.py results/*/history.json --extra eval_acc_min comm-mb-total --markdown
+       python scripts/compare.py results/*/history.json --tail 3
 
 columns: runs, final / best test accuracy, first round reaching --target accuracy (mean over the
 runs that reached it, "-" if none did) and, for differentially private runs, the final epsilon.
 ``--extra`` adds one column per history key with its last recorded value (mean ± std over seeds).
+``--tail K`` adds the test accuracy averaged over the last K rounds, which is steadier than the final round
+when the accuracy fluctuates from round to round (typical for non-IID data).
 """
 import argparse
 import csv
@@ -42,10 +45,11 @@ def last_value(history, key):
     return values[-1] if values else None
 
 
-def run_stats(history, target, extra=()):
+def run_stats(history, target, extra=(), tail=0):
     accs = [(r["round"], r["test_acc"]) for r in history if "test_acc" in r]
     reached = next((rnd for rnd, acc in accs if rnd > 0 and acc >= target), None)
     return {"final": accs[-1][1], "best": max(a for _, a in accs), "reached": reached,
+            "tail": statistics.fmean(a for _, a in accs[-tail:]) if tail else None,
             "extra": {key: last_value(history, key) for key in extra}}
 
 
@@ -80,12 +84,12 @@ def unique_labels(configs):
     return labels
 
 
-def summarise(paths, target, extra=()):
+def summarise(paths, target, extra=(), tail=0):
     groups = {}
     for path in paths:
         config, history, privacy = load(path)
         key = json.dumps({k: v for k, v in config.items() if k not in IGNORED}, sort_keys=True)
-        groups.setdefault(key, {"config": config, "runs": []})["runs"].append((run_stats(history, target, extra), privacy))
+        groups.setdefault(key, {"config": config, "runs": []})["runs"].append((run_stats(history, target, extra, tail), privacy))
     groups = list(groups.values())
     names = unique_labels([g["config"] for g in groups])
     rows = []
@@ -93,6 +97,7 @@ def summarise(paths, target, extra=()):
         runs = group["runs"]
         finals = [s["final"] for s, _ in runs]
         bests = [s["best"] for s, _ in runs]
+        tails = [s["tail"] for s, _ in runs if s["tail"] is not None]
         reached = [s["reached"] for s, _ in runs if s["reached"] is not None]
         eps = [float("inf") if p.get("epsilon_unbounded") else p["epsilon"] for _, p in runs if p]
         extras = {}
@@ -105,6 +110,7 @@ def summarise(paths, target, extra=()):
             "runs": len(runs),
             "final": fmt(*mean_std(finals), len(runs)),
             "best": fmt(*mean_std(bests), len(runs)),
+            "tail": fmt(*mean_std(tails), len(tails)),
             "rounds_to_target": "-" if not reached else f"{statistics.fmean(reached):.1f} ({len(reached)}/{len(runs)})",
             "epsilon": "-" if not eps else f"{statistics.fmean(eps):.4g}",
         })
@@ -116,13 +122,14 @@ def main(argv=None):
     p.add_argument("files", nargs="+")
     p.add_argument("--target", type=float, default=0.9, help="accuracy for the rounds-to-target column")
     p.add_argument("--extra", nargs="+", default=[], metavar="KEY", help="history keys to add as columns (last value)")
+    p.add_argument("--tail", type=int, default=0, metavar="K", help="add the test accuracy averaged over the last K rounds")
     p.add_argument("--markdown", action="store_true", help="print a Markdown table")
     p.add_argument("--csv", help="also write the table to this CSV file")
     args = p.parse_args(argv)
 
-    rows = summarise(args.files, args.target, args.extra)
-    columns = ["run", "runs", "final", "best", "rounds_to_target", "epsilon", *args.extra]
-    headers = {"run": "run", "runs": "runs", "final": "final acc", "best": "best acc",
+    rows = summarise(args.files, args.target, args.extra, args.tail)
+    columns = ["run", "runs", "final", *(["tail"] if args.tail else []), "best", "rounds_to_target", "epsilon", *args.extra]
+    headers = {"run": "run", "runs": "runs", "final": "final acc", "tail": f"last-{args.tail} mean", "best": "best acc",
                "rounds_to_target": f"rounds to {args.target:g}", "epsilon": "epsilon", **{k: k for k in args.extra}}
     widths = {c: max(len(headers[c]), *(len(str(r[c])) for r in rows)) for c in columns}
     if args.markdown:
@@ -136,7 +143,7 @@ def main(argv=None):
             print("  ".join(str(r[c]).ljust(widths[c]) for c in columns))
     if args.csv:
         with open(args.csv, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=columns)
+            writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(rows)
         print(f"saved: {args.csv}", file=sys.stderr)
