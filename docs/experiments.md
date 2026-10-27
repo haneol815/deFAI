@@ -106,3 +106,48 @@ python scripts/compare.py results/dp/*/history.json --tail 3 --extra dp-epsilon 
   the clipped update, and training still works. That is the usual picture for DP-FedAvg with many clients per round.
 - Caveats: ten rounds, IID data, two seeds, one dataset. The numbers say nothing about non-IID data, where clipping
   and noise interact with the heterogeneity.
+
+
+## E4: update compression
+
+MNIST, IID split over 10 clients, 5 sampled per round, 5 rounds of training (the tables show 6 evaluation points,
+round 0 being the untrained model), FedAvg. Clients compress their update just before sending it; the lossy update is
+sent dense, and the client reports what the encoded message would have cost.
+
+```bash
+python scripts/run_grid.py --output-dir results/compression --seeds 1 2 --num-supernodes 10 \
+  --base "dataset='mnist-mirror' partitioner='iid' num-server-rounds=5" \
+  --vary "compression='none'" \
+    "compression='topk' compression-ratio=0.1" "compression='topk' compression-ratio=0.1 error-feedback=true" \
+    "compression='topk' compression-ratio=0.01" "compression='topk' compression-ratio=0.01 error-feedback=true" \
+    "compression='quantize' compression-bits=4" "compression='quantize' compression-bits=2"
+python scripts/compare.py results/compression/*/history.json --tail 3 --extra compression-error comm-mb-up --target 0.9 --markdown
+```
+
+| run | runs | final acc | last-3 mean | rounds to 0.9 | compression-error | upload / round (MiB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| none (dense float32) | 2 | 0.954 ± 0.006 | 0.945 ± 0.005 | 2.0 (2/2) | - | 31.731 ± 0.000 |
+| top-k 10% | 2 | 0.952 ± 0.006 | 0.942 ± 0.006 | 2.5 (2/2) | 0.410 ± 0.001 | 6.345 ± 0.000 |
+| top-k 10% + error feedback | 2 | 0.952 ± 0.005 | 0.942 ± 0.005 | 2.0 (2/2) | 0.608 ± 0.028 | 6.345 ± 0.000 |
+| top-k 1% | 2 | 0.938 ± 0.005 | 0.922 ± 0.002 | 3.0 (2/2) | 0.729 ± 0.013 | 0.635 ± 0.000 |
+| top-k 1% + error feedback | 2 | 0.939 ± 0.005 | 0.927 ± 0.005 | 3.0 (2/2) | 0.879 ± 0.017 | 0.635 ± 0.000 |
+| quantize 4 bit | 2 | 0.955 ± 0.006 | 0.945 ± 0.005 | 2.0 (2/2) | 0.627 ± 0.036 | 3.966 ± 0.000 |
+| quantize 2 bit | 2 | 0.955 ± 0.006 | 0.945 ± 0.005 | 2.0 (2/2) | 2.537 ± 0.149 | 1.983 ± 0.000 |
+
+(`upload / round` is the traffic from the clients to the server in one round, MiB. `compression-error` is the share
+of the compressed update lost to compression, `‖sent − compressed‖ / ‖compressed‖`; with error feedback the compressed
+update includes the residual carried over from the previous round.)
+
+- **Quantisation was free in these runs, down to 2 bits.** 4-bit and 2-bit quantisation end at 0.955, like the dense
+  runs, with 8 and 16 times less upload (3.97 and 1.98 MiB against 31.7 MiB per round). The `compression-error` is
+  large (0.63 and 2.5: at 2 bits the sent update is further from the true one than it is long), but the stochastic
+  rounding is unbiased and the noise averages out over five clients. Five rounds of IID MNIST are a gentle test;
+  whether this holds near convergence, on non-IID data or with fewer clients per round was not checked.
+- **Top-k with 10% of the entries costs about 0.002 accuracy** (within the seed-to-seed spread) for 5 times less
+  upload. **Top-k with 1% costs about 0.016** at 50 times less upload, and is visibly slower in the first rounds
+  (round 1: 0.67 and 0.79 against 0.86 and 0.87 dense).
+- **Error feedback made no measurable difference** here (0.952 against 0.952 and 0.939 against 0.938). It is designed
+  to recover what top-k drops over *many* rounds; five rounds are too few to see it, so this says nothing against it.
+- Only the upload shrinks: the model sent to the clients is dense. The total traffic of the run (`comm-mb-total`)
+  fell from 317 MiB to between 162 and 190 MiB for the top-k runs.
+- Compression was not combined with DP here (see the README for how the two interact).
