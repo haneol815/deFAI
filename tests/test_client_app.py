@@ -342,6 +342,19 @@ def test_error_feedback_keeps_a_residual_in_the_client_state_and_uses_it_next_ro
     assert any(not np.allclose(update_of(second)[k], update_of(fresh)[k]) for k in honest)
 
 
+def test_compression_error_is_the_share_of_the_compressed_update_that_was_lost():
+    # with error feedback the compressor sees update + carried-over residual, and the metric measures against that
+    cfg = config(compression="topk", **{"compression-ratio": 0.05, "error-feedback": True})
+    first, ctx = run_train(cfg)
+    first_residual = to_arrays(ctx.state[STATE_EF_RESIDUAL])
+    honest = update_of(run_train(config())[0])
+    assert first.content["metrics"]["compression-error"] == pytest.approx(l2_norm(first_residual) / l2_norm(honest), rel=1e-4)
+    second, _ = run_train(cfg, ctx=ctx)
+    second_residual = to_arrays(ctx.state[STATE_EF_RESIDUAL])
+    compressed = {k: honest[k] + first_residual[k] for k in honest}
+    assert second.content["metrics"]["compression-error"] == pytest.approx(l2_norm(second_residual) / l2_norm(compressed), rel=1e-4)
+
+
 def test_the_upload_cost_of_a_scaffold_client_includes_its_uncompressed_control_variate():
     plain, _ = run_train(config(compression="topk", **{"compression-ratio": 0.05}))
     scaffold, _ = run_train(config(compression="topk", **{"compression-ratio": 0.05}), **{KEY_C: zero_control_variate()})

@@ -134,7 +134,7 @@ One row per round (round 0 is the initial model), merged from three sources:
 | `train_loss` | mean task loss of the local training (without the FedProx / MOON regularisers) |
 | `comm-mb-down`, `comm-mb-up`, `comm-mb-total` | training traffic in MiB: model sent to the sampled clients, what came back, and the running total of the run (evaluation messages not counted). SCAFFOLD pays twice per direction for its control variates |
 | `eval_acc_personalized`, `eval_loss_personalized` (+ `_min`/`_max`/`_std`) | with `personalize-epochs` > 0: the same evaluation after the client fine-tuned the received model locally. The gap to `eval_acc` is what a global model leaves on the table for each client |
-| `compression-error` | with `compression`: relative error `‖sent − true‖ / ‖true‖` of the update the clients sent |
+| `compression-error` | with `compression`: share of the compressed update lost to compression, `‖sent − compressed‖ / ‖compressed‖`, averaged over clients (with `error-feedback` the compressed update is the client's update plus its carried-over residual) |
 | `dp-*` | differential-privacy bookkeeping, see [Differential privacy](#differential-privacy) |
 
 To choose a `dirichlet-alpha`, look at the split it produces:

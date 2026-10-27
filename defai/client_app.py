@@ -159,8 +159,9 @@ def train(msg: Message, context: Context):
         )
         if cfg["error-feedback"]:
             residual = to_arrays(context.state[STATE_EF_RESIDUAL]) if STATE_EF_RESIDUAL in context.state else None
-            decoded, nbytes, residual = compress_with_feedback(update, residual, cfg["compression"], **options_c)
-            context.state[STATE_EF_RESIDUAL] = to_record(residual)
+            decoded, nbytes, new_residual = compress_with_feedback(update, residual, cfg["compression"], **options_c)
+            context.state[STATE_EF_RESIDUAL] = to_record(new_residual)
+            update = {k: decoded[k] + new_residual[k] for k in decoded}  # what was compressed: update + carried-over residual
         else:
             decoded, nbytes = compress(update, cfg["compression"], **options_c)
         local_arrays = {k: (global_arrays[k] + decoded[k]).astype(global_arrays[k].dtype) for k in local_arrays}
