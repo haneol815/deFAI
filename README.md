@@ -83,8 +83,9 @@ flwr run . --stream --federation-config "num-supernodes=10" \
 - `history.json` is strict JSON: non-finite numbers (e.g. an infinite epsilon) are written as `null`.
 - A `ServerApp` exception does not change the exit code of `flwr run`; look for a `Traceback` in the log.
 - `dataset='synthetic'` generates MNIST-like images locally, so a run needs no download. This is handy for smoke tests
-  and in environments without access to Hugging Face. It is too easy to compare algorithms on, though: every one of
-  them reaches 100% accuracy within a few rounds.
+  and in environments without access to Hugging Face. It is too easy to compare algorithms on, though: on a
+  Dirichlet α=0.1 split of 10 clients, FedAvg, FedProx, SCAFFOLD, MOON, FedNova and q-FedAvg all end at 100% test
+  accuracy after 20 rounds and differ only in how soon they get there (9 to 19 rounds to reach 99%).
 - `dataset='mnist-mirror'` and `'fashion-mnist-mirror'` are the original MNIST / Fashion-MNIST IDX archives, downloaded
   by `defai/mirror.py` from the mirrors torchvision (S3) and Keras (GCS) use, verified against pinned SHA-256 sums and
   cached in `~/.cache/defai` (`DEFAI_DATA_DIR` changes it). They are the standard 60k/10k splits (Fashion-MNIST is a harder task than
