@@ -141,3 +141,22 @@ def test_test_leaves_the_model_in_eval_mode_and_does_not_track_gradients():
 
 def test_get_device_prefers_cuda_only_when_available():
     assert task.get_device().type == ("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# ------------------------------------------------------------------------- partition statistics
+def test_partition_label_counts_match_the_partitions_and_the_dataset():
+    cfg = config(partitioner="dirichlet", **{"dirichlet-alpha": 0.2})
+    counts = task.partition_label_counts(NUM_PARTITIONS, cfg)
+    assert counts.shape == (NUM_PARTITIONS, task.NUM_CLASSES)
+    for i in range(NUM_PARTITIONS):  # cross-checked against an independent read of each partition
+        assert counts[i].tolist() == np.bincount(labels_of(i, cfg), minlength=10).tolist()
+    assert counts.sum(axis=0).tolist() == [300] * 10  # every example of the train set belongs to exactly one client
+
+
+def test_label_skew_is_one_over_classes_when_uniform_and_one_when_each_client_has_one_class():
+    assert task.label_skew(np.full((4, 10), 7)) == pytest.approx(0.1)
+    assert task.label_skew(np.eye(10, dtype=int) * 5) == pytest.approx(1.0)
+    assert task.label_skew([[3, 1], [0, 4]]) == pytest.approx((0.75 + 1.0) / 2)
+    assert task.label_skew(task.partition_label_counts(NUM_PARTITIONS, config(partitioner="dirichlet"))) == pytest.approx(
+        label_skew(config(partitioner="dirichlet"))
+    )

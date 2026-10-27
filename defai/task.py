@@ -137,6 +137,21 @@ def _partition_source(num_partitions, cfg):
     return _sources[key]
 
 
+def partition_label_counts(num_partitions, cfg):
+    """(num_partitions, NUM_CLASSES) array: how many examples of each class every client holds."""
+    source = _partition_source(num_partitions, cfg)
+    counts = np.zeros((num_partitions, NUM_CLASSES), dtype=np.int64)
+    for i in range(num_partitions):
+        counts[i] = np.bincount(np.asarray(source.load_partition(i)["label"]), minlength=NUM_CLASSES)
+    return counts
+
+
+def label_skew(counts):
+    """Mean over clients of the share of the client's most frequent class (1 / classes = uniform, 1 = one class)."""
+    counts = np.asarray(counts, dtype=np.float64)
+    return float(np.mean(counts.max(axis=1) / counts.sum(axis=1)))
+
+
 def load_client_data(partition_id, num_partitions, cfg):
     """Return (trainloader, valloader) for this client's partition."""
     partition = _partition_source(num_partitions, cfg).load_partition(partition_id)
