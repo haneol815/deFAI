@@ -262,3 +262,32 @@ def test_clients_may_report_the_bytes_they_really_sent_for_compressed_uploads():
     _, metrics = aggregate(strategy, [reply(m) for m in messages])
     assert metrics["comm-mb-up"] == pytest.approx(N * 1000 / MIB)
     assert "upload-bytes" not in metrics  # the raw per-client value is not averaged into the metrics
+
+
+# ------------------------------------------------------------------------------------ lr decay
+def sent_lrs(strategy, rounds=4):
+    grid = FakeGrid(N, QuadraticClients(TARGETS))
+    train_config = ConfigRecord({"lr": 0.1})
+    strategy.start(grid=grid, initial_arrays=START, num_rounds=rounds, train_config=train_config)
+    return [m.content["config"]["lr"] for m in grid.sent if m.metadata.message_type == MessageType.TRAIN][::N], train_config
+
+
+def test_the_client_learning_rate_decays_geometrically_per_round():
+    lrs, train_config = sent_lrs(FedAvg(lr_decay=0.5, **COMMON))
+    assert lrs == pytest.approx([0.1, 0.05, 0.025, 0.0125])
+    assert train_config["lr"] == 0.1  # the caller's shared config is not mutated
+
+
+def test_without_decay_the_learning_rate_is_constant():
+    lrs, _ = sent_lrs(FedAvg(**COMMON))
+    assert lrs == [0.1, 0.1, 0.1, 0.1]
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.5, 1.5])
+def test_lr_decay_must_be_in_zero_one(bad):
+    with pytest.raises(ValueError):
+        FedAvg(lr_decay=bad)
+
+
+def test_scaffold_and_others_inherit_the_decay():
+    assert sent_lrs(Scaffold(lr_decay=0.9, **COMMON))[0] == pytest.approx([0.1, 0.09, 0.081, 0.0729])

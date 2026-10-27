@@ -57,3 +57,9 @@ def test_dp_is_rejected_for_strategies_that_cannot_support_it():
         with pytest.raises(ValueError, match="differential privacy"):
             build_strategy(default_config(strategy=name, dp="fixed"))
     build_strategy(default_config(strategy="fedadam", dp="adaptive"))  # allowed
+
+
+def test_lr_decay_reaches_every_strategy():
+    cfg = default_config()
+    for name in STRATEGIES:
+        assert build_strategy({**cfg, "strategy": name, "lr-decay": 0.8}).lr_decay == 0.8

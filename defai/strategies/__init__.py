@@ -57,6 +57,7 @@ def build_strategy(cfg):
         fraction_train=cfg["fraction-train"],
         fraction_evaluate=cfg["fraction-evaluate"],
         server_learning_rate=cfg["fedopt-learning-rate"] if name in FEDOPT else cfg["server-learning-rate"],
+        lr_decay=cfg["lr-decay"],
         dp=build_dp(cfg),
         seed=cfg["seed"],
     )

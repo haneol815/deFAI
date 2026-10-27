@@ -124,6 +124,8 @@ class FedAvg(Strategy):
         MetricRecord entry holding each client's aggregation weight.
     server_learning_rate : float
         Scales the aggregated update (1.0 = plain FedAvg).
+    lr_decay : float
+        The clients' learning rate in round ``t`` is ``lr * lr_decay ** (t - 1)`` (1.0 = constant).
     dp : defai.privacy.dp FixedClipping | AdaptiveClipping | None
         Central differential privacy applied to the aggregated update.
     seed : int | None
@@ -145,6 +147,7 @@ class FedAvg(Strategy):
         min_available_nodes: int = 2,
         weighted_by_key: str = "num-examples",
         server_learning_rate: float = 1.0,
+        lr_decay: float = 1.0,
         dp=None,
         seed: int | None = None,
     ) -> None:
@@ -157,6 +160,9 @@ class FedAvg(Strategy):
         self.min_available_nodes = min_available_nodes
         self.weighted_by_key = weighted_by_key
         self.server_learning_rate = server_learning_rate
+        if not 0.0 < lr_decay <= 1.0:
+            raise ValueError("lr_decay must be in (0, 1]")
+        self.lr_decay = lr_decay
         self.dp = dp
         self._rng = random.Random(seed)
         self._rank: dict[int, int] = {}     # node id -> position in registration order
@@ -173,7 +179,7 @@ class FedAvg(Strategy):
         log(INFO, "\t│\t├── Sampling: train %.2f | evaluate %.2f", self.fraction_train, self.fraction_evaluate)
         log(INFO, "\t│\t├── Minimum nodes: train %d | evaluate %d | available %d",
             self.min_train_nodes, self.min_evaluate_nodes, self.min_available_nodes)
-        log(INFO, "\t│\t├── Server learning rate: %s", self.server_learning_rate)
+        log(INFO, "\t│\t├── Server learning rate: %s | client lr decay per round: %s", self.server_learning_rate, self.lr_decay)
         log(INFO, "\t│\t└── Differential privacy: %s", self.dp.describe() if self.dp else "off")
 
     # ----------------------------------------------------------------- sampling
@@ -218,6 +224,8 @@ class FedAvg(Strategy):
         self._global = to_arrays(arrays)
         config = ConfigRecord(dict(config))  # never mutate the caller's (shared) config
         config["server-round"] = server_round
+        if self.lr_decay != 1.0 and "lr" in config:
+            config["lr"] = float(config["lr"]) * self.lr_decay ** (server_round - 1)
         self._extend_train_config(server_round, config)
         if self.dp is not None:
             config.update(self.dp.client_config())

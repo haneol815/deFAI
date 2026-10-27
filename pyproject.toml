@@ -49,6 +49,7 @@ seed = 42
 local-epochs = 1
 batch-size = 32
 learning-rate = 0.01
+lr-decay = 1.0             # client lr in round t = learning-rate * lr-decay^(t-1)
 # non-IID algorithms
 proximal-mu = 0.01          # fedprox: weight of the proximal term
 moon-mu = 1.0               # moon: weight of the contrastive loss

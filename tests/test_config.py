@@ -33,6 +33,7 @@ def test_default_config_is_valid():
         ({"dp-clip-norm": -1.0}, "dp-clip-norm"),
         ({"num-malicious": -1}, "num-malicious"),
         ({"dropout-rate": 1.5}, "dropout-rate"),
+        ({"lr-decay": 0.0}, "lr-decay"),
         ({"learning-rate": 0.0}, "learning-rate"),
     ],
 )

@@ -29,6 +29,7 @@ RANGES = {
     "local-epochs": (lambda v: v >= 1, ">= 1"),
     "batch-size": (lambda v: v >= 1, ">= 1"),
     "learning-rate": (lambda v: v > 0, "> 0"),
+    "lr-decay": (lambda v: 0 < v <= 1, "in (0, 1]"),
     "dirichlet-alpha": (lambda v: v > 0, "> 0"),
     "proximal-mu": (lambda v: v >= 0, ">= 0"),
     "moon-mu": (lambda v: v >= 0, ">= 0"),
