@@ -49,11 +49,12 @@ def test_hyperparameters_reach_the_strategies():
     mk = build_strategy({**cfg, "strategy": "multikrum", "num-byzantine": 2, "multikrum-select": 4})
     assert (mk.num_byzantine, mk.num_select) == (2, 4)
     assert build_strategy({**cfg, "strategy": "krum"}).num_select == 1
+    assert build_strategy({**cfg, "strategy": "qfedavg", "qfedavg-q": 2.5}).q == 2.5
     assert build_strategy({**cfg, "strategy": "fedtrimmedavg", "trim-ratio": 0.1}).beta == 0.1
 
 
 def test_dp_is_rejected_for_strategies_that_cannot_support_it():
-    for name in ("scaffold", "fednova", "fedmedian", "fedtrimmedavg", "krum", "multikrum", "bulyan"):
+    for name in ("scaffold", "fednova", "qfedavg", "fedmedian", "fedtrimmedavg", "krum", "multikrum", "bulyan"):
         with pytest.raises(ValueError, match="differential privacy"):
             build_strategy(default_config(strategy=name, dp="fixed"))
     build_strategy(default_config(strategy="fedadam", dp="adaptive"))  # allowed

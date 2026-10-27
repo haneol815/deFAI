@@ -10,6 +10,7 @@ puts into the train message (``proximal-mu``, ``moon-mu``, the ``c`` control var
 * MOON:     Li et al., "Model-Contrastive Federated Learning", CVPR 2021.
 * FedNova:  Wang et al., "Tackling the Objective Inconsistency Problem in Heterogeneous
             Federated Optimization", NeurIPS 2020.
+* q-FedAvg: Li et al., "Fair Resource Allocation in Federated Learning", ICLR 2020.
 """
 
 from logging import INFO
@@ -133,3 +134,51 @@ class FedNova(FedAvg):
         rescaled = [{k: v * (tau_eff / tau) for k, v in u.delta.items()} for u, tau in zip(updates, steps)]
         log(INFO, "\tFedNova: local steps %s, effective %.2f", steps.astype(int).tolist(), tau_eff)
         return weighted_mean(rescaled, weights.tolist())
+
+
+class QFedAvg(FedAvg):
+    """q-FedAvg: weight clients by their loss to make the model fairer (Li et al., 2020).
+
+    Minimises ``sum_k F_k^(q+1) / (q+1)`` instead of the average loss, so clients the global model
+    serves badly count more. With ``F_k`` the loss of the received model on client ``k``'s data, ``L``
+    an estimate of the Lipschitz constant (``1 / client learning rate``) and ``delta_k = w_k - w``::
+
+        delta = L * sum_k F_k^q * delta_k / sum_k h_k,
+        h_k   = q * F_k^(q-1) * ||L * delta_k||^2 + L * F_k^q
+
+    ``q = 0`` is the uniform average (FedAvg with equal weights); a larger ``q`` trades mean accuracy for
+    a better worst client. The update is already scaled, so ``server_learning_rate`` should stay 1.
+    Clients report ``F_k`` as ``initial-loss`` (measured before training, on request). Not compatible
+    with DP: the weights depend on private losses.
+    """
+
+    name = "qfedavg"
+    supports_dp = False
+    required_metrics = ("initial-loss",)
+
+    def __init__(self, *, q: float = 0.1, **kwargs) -> None:
+        super().__init__(**kwargs)
+        if q < 0:
+            raise ValueError("q must be non-negative")
+        self.q = q
+        self._client_lr = 0.0
+
+    def _extend_train_config(self, server_round: int, config: ConfigRecord) -> None:
+        config["report-initial-loss"] = True
+        self._client_lr = float(config["lr"])  # already decayed for this round
+
+    def aggregate_updates(self, updates: list[ClientUpdate]) -> Arrays:
+        lipschitz = 1.0 / self._client_lr
+        losses = np.asarray([u.metrics["initial-loss"] for u in updates], dtype=np.float64) + 1e-10
+        numerator = {k: np.zeros_like(v) for k, v in updates[0].delta.items()}
+        denominator = 0.0
+        for u, loss in zip(updates, losses):
+            for k, v in u.delta.items():
+                numerator[k] += lipschitz * loss**self.q * v
+            sq_norm = sum(float(np.sum(np.square(v))) for v in u.delta.values())
+            denominator += self.q * loss ** (self.q - 1) * lipschitz**2 * sq_norm + lipschitz * loss**self.q
+        return {k: v / denominator for k, v in numerator.items()}
+
+    def summary(self) -> None:
+        super().summary()
+        log(INFO, "\t└──> q-FedAvg: q=%s", self.q)

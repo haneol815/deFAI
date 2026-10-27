@@ -34,6 +34,7 @@ def test_default_config_is_valid():
         ({"num-malicious": -1}, "num-malicious"),
         ({"dropout-rate": 1.5}, "dropout-rate"),
         ({"lr-decay": 0.0}, "lr-decay"),
+        ({"qfedavg-q": -1.0}, "qfedavg-q"),
         ({"learning-rate": 0.0}, "learning-rate"),
     ],
 )
@@ -48,7 +49,7 @@ def test_all_problems_are_reported_together():
     assert "attack" in str(err.value) and "dp-delta" in str(err.value)
 
 
-@pytest.mark.parametrize("strategy", ["scaffold", "fednova", "fedmedian", "fedtrimmedavg", "krum", "multikrum", "bulyan"])
+@pytest.mark.parametrize("strategy", ["scaffold", "fednova", "qfedavg", "fedmedian", "fedtrimmedavg", "krum", "multikrum", "bulyan"])
 def test_dp_with_a_non_mean_strategy_is_rejected_up_front(strategy):
     with pytest.raises(ValueError, match="mean-based"):
         validate_config(cfg(strategy=strategy, dp="fixed"))

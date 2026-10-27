@@ -33,6 +33,7 @@ RANGES = {
     "dirichlet-alpha": (lambda v: v > 0, "> 0"),
     "proximal-mu": (lambda v: v >= 0, ">= 0"),
     "moon-mu": (lambda v: v >= 0, ">= 0"),
+    "qfedavg-q": (lambda v: v >= 0, ">= 0"),
     "moon-temperature": (lambda v: v > 0, "> 0"),
     "server-learning-rate": (lambda v: v > 0, "> 0"),
     "server-momentum": (lambda v: 0 <= v < 1, "in [0, 1)"),

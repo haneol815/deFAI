@@ -35,7 +35,7 @@ clientapp = "defai.client_app:app"
 [tool.flwr.app.config]
 # federation
 num-server-rounds = 10
-# fedavg | fedprox | moon | scaffold | fednova | fedavgm | fedadagrad | fedadam | fedyogi
+# fedavg | fedprox | moon | scaffold | fednova | qfedavg | fedavgm | fedadagrad | fedadam | fedyogi
 # | fedmedian | fedtrimmedavg | krum | multikrum | bulyan
 strategy = "fedavg"
 fraction-train = 0.5        # fraction of SuperNodes sampled per round
@@ -54,6 +54,7 @@ lr-decay = 1.0             # client lr in round t = learning-rate * lr-decay^(t-
 proximal-mu = 0.01          # fedprox: weight of the proximal term
 moon-mu = 1.0               # moon: weight of the contrastive loss
 moon-temperature = 0.5      # moon: softmax temperature
+qfedavg-q = 0.1             # qfedavg: fairness exponent (0 = uniform average, larger = favour the worst clients)
 # server optimisation
 server-learning-rate = 1.0  # fedavg / fedprox / moon / scaffold / robust rules: scales the aggregated update
 server-momentum = 0.9       # fedavgm

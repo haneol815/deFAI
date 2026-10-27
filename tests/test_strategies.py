@@ -19,6 +19,7 @@ from defai.strategies import (
     Krum,
     Moon,
     MultiKrum,
+    QFedAvg,
     Scaffold,
 )
 from conftest import QuadraticClients, run_strategy
@@ -428,3 +429,57 @@ def test_fednova_rejects_dp_and_needs_the_step_count():
     with pytest.raises(ValueError):
         FedNova(dp=FixedClipping(1.0, 1.0))
     assert FedNova.required_metrics == ("local-steps",)
+
+
+# ----------------------------------------------------------------------------------- q-FedAvg
+def client_losses(targets, w):
+    return np.array([0.5 * np.sum((w - t) ** 2) for t in targets.values()])
+
+
+def test_qfedavg_with_q_zero_is_the_uniform_average():
+    common = dict(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
+    q0, _, _ = run(QFedAvg(q=0.0, **common), rounds=6)
+    avg, _, _ = run(FedAvg(**common), rounds=6)  # QuadraticClients has equal data sizes
+    np.testing.assert_allclose(q0, avg, atol=1e-6)
+
+
+def test_qfedavg_one_round_matches_the_paper_formula():
+    q, lr, steps = 1.0, 0.1, 5
+    clients = QuadraticClients(TARGETS, lr=lr, steps=steps)
+    w, _, _ = run_strategy(QFedAvg(q=q, **COMMON), clients, N, rounds=1, dim=DIM)
+    # from w = 0: client n's loss is F_n = 0.5*||t_n||^2 and its local model moves by delta_n = t_n * (1 - (1-lr)^steps)
+    L = 1 / lr
+    F = np.array([0.5 * np.sum(TARGETS[n] ** 2) for n in TARGETS]) + 1e-10
+    delta = np.stack([TARGETS[n] * (1 - (1 - lr) ** steps) for n in TARGETS])
+    h = np.sum(q * F ** (q - 1) * L**2 * np.sum(delta**2, axis=1) + L * F**q)
+    expected = L * np.einsum("i,id->d", F**q, delta) / h
+    np.testing.assert_allclose(w, expected, rtol=1e-4)
+
+
+def test_qfedavg_trades_mean_loss_for_a_better_worst_client():
+    targets = {1: np.array([-1.0]), 2: np.array([-1.0]), 3: np.array([-1.0]), 4: np.array([4.0])}  # one outlier client
+    common = dict(fraction_train=1.0, fraction_evaluate=1.0, seed=0)
+
+    def final_losses(q):
+        w, _, _ = run_strategy(QFedAvg(q=q, **common), QuadraticClients(targets, lr=0.1, steps=5), 4, 300, dim=1)
+        return client_losses(targets, w)
+
+    fair, plain = final_losses(2.0), final_losses(0.0)
+    assert fair.max() < 0.6 * plain.max()   # the outlier is served much better ...
+    assert fair.mean() > plain.mean()       # ... at the price of the average (that is the trade-off)
+
+
+def test_qfedavg_asks_for_the_initial_loss_with_the_decayed_learning_rate():
+    strategy = QFedAvg(lr_decay=0.5, **COMMON)
+    _, _, grid = run(strategy, rounds=3)
+    train = [m for m in grid.sent if m.metadata.message_type == "train"]
+    assert all(m.content["config"]["report-initial-loss"] is True for m in train)
+    assert strategy._client_lr == pytest.approx(0.1 * 0.5**2)  # round 3 -> L = 1 / (lr * decay^2)
+
+
+def test_qfedavg_validation_and_dp_exclusion():
+    with pytest.raises(ValueError):
+        QFedAvg(q=-0.1)
+    with pytest.raises(ValueError):
+        QFedAvg(dp=FixedClipping(1.0, 1.0))
+    assert QFedAvg.required_metrics == ("initial-loss",)

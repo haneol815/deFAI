@@ -71,6 +71,8 @@ class QuadraticClients:
         if node in self.bad:
             reply["arrays"] = to_record({"w": np.full_like(y, 1e3, dtype=np.float32)})
         metrics = {"train_loss": float(0.5 * np.sum((w - t) ** 2)), "num-examples": self.num_examples[node], "local-steps": steps}
+        if config.get("report-initial-loss", False):  # loss of the received model, before local training
+            metrics["initial-loss"] = max(float(0.5 * np.sum((w - t) ** 2)), 1e-12)
         reply["metrics"] = MetricRecord(metrics)
         return Message(content=RecordDict(reply), reply_to=msg)
 

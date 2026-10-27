@@ -3,13 +3,13 @@
 from defai.privacy.dp import AdaptiveClipping, FixedClipping
 from defai.strategies.base import ClientUpdate, FedAvg
 from defai.strategies.fedopt import FedAdagrad, FedAdam, FedAvgM, FedYogi
-from defai.strategies.heterogeneity import FedNova, FedProx, Moon, Scaffold
+from defai.strategies.heterogeneity import FedNova, FedProx, Moon, QFedAvg, Scaffold
 from defai.strategies.robust import Bulyan, FedMedian, FedTrimmedAvg, Krum, MultiKrum
 
 STRATEGIES = {
     cls.name: cls
     for cls in (
-        FedAvg, FedProx, Moon, Scaffold, FedNova,
+        FedAvg, FedProx, Moon, Scaffold, FedNova, QFedAvg,
         FedAvgM, FedAdagrad, FedAdam, FedYogi,
         FedMedian, FedTrimmedAvg, Krum, MultiKrum, Bulyan,
     )
@@ -18,7 +18,7 @@ FEDOPT = ("fedadagrad", "fedadam", "fedyogi")
 
 __all__ = [
     "STRATEGIES", "build_strategy", "build_dp", "ClientUpdate",
-    "FedAvg", "FedProx", "Moon", "Scaffold", "FedNova", "FedAvgM", "FedAdagrad", "FedAdam", "FedYogi",
+    "FedAvg", "FedProx", "Moon", "Scaffold", "FedNova", "QFedAvg", "FedAvgM", "FedAdagrad", "FedAdam", "FedYogi",
     "FedMedian", "FedTrimmedAvg", "Krum", "MultiKrum", "Bulyan",
 ]
 
@@ -65,6 +65,7 @@ def build_strategy(cfg):
         {
             "fedprox": dict(proximal_mu=cfg["proximal-mu"]),
             "moon": dict(mu=cfg["moon-mu"], temperature=cfg["moon-temperature"]),
+            "qfedavg": dict(q=cfg["qfedavg-q"]),
             "fedavgm": dict(momentum=cfg["server-momentum"]),
             "fedadagrad": dict(beta_1=cfg["beta-1"], beta_2=cfg["beta-2"], tau=cfg["tau"]),
             "fedadam": dict(beta_1=cfg["beta-1"], beta_2=cfg["beta-2"], tau=cfg["tau"]),
