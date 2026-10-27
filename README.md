@@ -8,7 +8,7 @@ and the same code can be deployed to a real distributed setup with the Deploymen
   plus an offline `synthetic` dataset for smoke tests
 - Partitioning: IID, Dirichlet non-IID
 - Algorithms (all implemented in this repo against Flower's `Strategy` interface — see [Algorithms](#algorithms)):
-  - non-IID: FedProx, SCAFFOLD, MOON
+  - non-IID / heterogeneity: FedProx, SCAFFOLD, MOON, FedNova, q-FedAvg (fairness)
   - server optimisation: FedAvgM, FedAdagrad, FedAdam, FedYogi
   - Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum, Multi-Krum, Bulyan
   - central differential privacy: fixed / adaptive clipping, server- or client-side, with an RDP accountant
@@ -131,6 +131,8 @@ Select with `strategy='<name>'`. Every strategy is implemented in `defai/strateg
 | `fedprox` | Proximal term `μ/2·‖w−w_global‖²` in the local loss | `proximal-mu` | Li et al., 2020 |
 | `moon` | Model-contrastive loss vs. global and previous local representation | `moon-mu`, `moon-temperature` | Li et al., 2021 |
 | `scaffold` | Control variates correct client drift (option II) | `learning-rate`, `local-epochs` | Karimireddy et al., 2020 |
+| `fednova` | Normalised averaging: removes the bias from clients doing unequal numbers of local steps | – | Wang et al., 2020 |
+| `qfedavg` | Weights clients by their loss to improve the worst client | `qfedavg-q` | Li et al., 2020 |
 | `fedavgm` | Server momentum | `server-momentum`, `server-learning-rate` | Hsu et al., 2019 |
 | `fedadagrad` `fedadam` `fedyogi` | Adaptive server optimisers | `fedopt-learning-rate`, `beta-1`, `beta-2`, `tau` | Reddi et al., 2021 |
 | `fedmedian` | Coordinate-wise median | – | Yin et al., 2018 |
@@ -138,8 +140,20 @@ Select with `strategy='<name>'`. Every strategy is implemented in `defai/strateg
 | `krum` `multikrum` | Pick the update(s) closest to their neighbours | `num-byzantine`, `multikrum-select` | Blanchard et al., 2017 |
 | `bulyan` | Recursive Krum selection, then the values closest to the median | `num-byzantine` (needs `4f+3` replies) | El Mhamdi et al., 2018 |
 
+`fednova` and `qfedavg` need two extra numbers from the clients, which they report on their own: `local-steps`
+(for FedNova) and `initial-loss`, the loss of the received model before local training (for q-FedAvg). Neither is
+combined with differential privacy: the per-client rescaling and the loss weights are not bounded by clipping.
+
 SCAFFOLD and MOON keep per-client state (the client's control variate / previous local model) in
 `context.state`, which the simulation engine preserves between rounds.
+
+### Client failures and learning-rate schedule
+`dropout-rate=0.3` makes every sampled client fail to answer a train message with probability 0.3 (decided from
+`seed`, partition and round, so runs stay reproducible). The server skips the missing replies; with DP the
+denominator stays the number of *sampled* clients, so the privacy guarantee is unaffected. `comm-mb-up` below
+`comm-mb-down` in `history.json` shows how much was lost.
+
+`lr-decay=0.95` multiplies the clients' learning rate by 0.95 each round (`learning-rate * lr-decay^(round-1)`).
 
 ### Robustness experiments
 Clients with `partition-id < num-malicious` misbehave. `num-byzantine` is what the *defence* assumes (Krum's `f`);
