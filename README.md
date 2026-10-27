@@ -92,6 +92,7 @@ pip install -e ".[plot]"
 python scripts/plot.py results/*/history.json -o results/acc.png
 python scripts/plot.py results/*/history.json -m dp-epsilon -o results/eps.png   # any history key
 python scripts/compare.py results/*/history.json --target 0.95                   # one row per configuration
+python scripts/compare.py results/*/history.json --extra eval_acc_min comm-mb-total --markdown  # more columns, as a Markdown table
 ```
 `compare.py` groups runs that differ only in `seed` and reports mean ± std (a single seed is too noisy to rank
 algorithms, especially on non-IID data). `scripts/run_grid.py` runs such a grid, variants × seeds, and calls
