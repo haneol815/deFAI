@@ -13,6 +13,8 @@ and the same code can be deployed to a real distributed setup with the Deploymen
   - Byzantine-robust aggregation: FedMedian, FedTrimmedAvg, Krum, Multi-Krum, Bulyan
   - central differential privacy: fixed / adaptive clipping, server- or client-side, with an RDP accountant
 - Malicious-client simulation: label flipping, sign flipping, Gaussian-noise updates
+- Communication: traffic accounting, lossy update compression (top-k, quantisation, error feedback)
+- Evaluation: per-client spread of accuracy, personalised accuracy after local fine-tuning, client dropout
 - Evaluation: federated (on each client's local data) + centralized (on the full test set at the server)
 
 ## Structure
@@ -26,6 +28,7 @@ and the same code can be deployed to a real distributed setup with the Deploymen
 │   ├── config.py             # Run-config validation (fails fast on typos / out-of-range values)
 │   ├── aggregation.py        # Pure-numpy rules: weighted mean, median, trimmed mean, Krum, Bulyan
 │   ├── attacks.py            # Malicious-client behaviours
+│   ├── compression.py        # Top-k / quantisation / error feedback for client updates
 │   ├── records.py            # ArrayRecord <-> numpy helpers, wire-format keys
 │   ├── strategies/
 │   │   ├── base.py           # FedAvg + the hooks every strategy plugs into
@@ -112,6 +115,8 @@ One row per round (round 0 is the initial model), merged from three sources:
 | `eval_acc_min`, `eval_acc_max`, `eval_acc_std` | the same accuracy over clients, **unweighted**: the worst and best client and their spread. A good mean with a low minimum means the model fails some clients |
 | `train_loss` | mean task loss of the local training (without the FedProx / MOON regularisers) |
 | `comm-mb-down`, `comm-mb-up`, `comm-mb-total` | training traffic in MiB: model sent to the sampled clients, what came back, and the running total of the run (evaluation messages not counted). SCAFFOLD pays twice per direction for its control variates |
+| `eval_acc_personalized`, `eval_loss_personalized` (+ `_min`/`_max`/`_std`) | with `personalize-epochs` > 0: the same evaluation after the client fine-tuned the received model locally. The gap to `eval_acc` is what a global model leaves on the table for each client |
+| `compression-error` | with `compression`: relative error `‖sent − true‖ / ‖true‖` of the update the clients sent |
 | `dp-*` | differential-privacy bookkeeping, see [Differential privacy](#differential-privacy) |
 
 To choose a `dirichlet-alpha`, look at the split it produces:
@@ -146,6 +151,20 @@ combined with differential privacy: the per-client rescaling and the loss weight
 
 SCAFFOLD and MOON keep per-client state (the client's control variate / previous local model) in
 `context.state`, which the simulation engine preserves between rounds.
+
+### Communication: compression
+`compression='topk'` keeps the `compression-ratio` largest-magnitude entries of each client's update;
+`compression='quantize'` rounds every tensor to `compression-bits` bits with stochastic rounding (unbiased);
+`error-feedback=true` remembers what was lost and adds it to the client's next update (it is kept in the client's
+state). The lossy update is sent as a dense array, so the server is unchanged, and the client reports what the
+encoded message would have cost (`upload-bytes`, shown as `comm-mb-up`). A top-k message costs 8 bytes per kept
+entry, so a ratio of 0.1 is about a fifth of the dense float32 upload; 8-bit quantisation is a quarter.
+```bash
+flwr run . --stream --federation-config "num-supernodes=10" --run-config \
+  "compression='topk' compression-ratio=0.1 error-feedback=true"
+```
+Compression is applied last. With DP the server still clips every update, so the privacy guarantee holds, but the
+compression error is not part of the accounting; SCAFFOLD's control variate is sent uncompressed and counted as such.
 
 ### Client failures and learning-rate schedule
 `dropout-rate=0.3` makes every sampled client fail to answer a train message with probability 0.3 (decided from
