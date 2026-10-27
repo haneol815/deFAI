@@ -17,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 plot = ["matplotlib"]
-test = ["pytest", "dp-accounting"]  # dp-accounting only cross-checks the RDP accountant
+test = ["pytest", "pytest-cov", "dp-accounting", "ruff"]  # dp-accounting only cross-checks the RDP accountant
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
@@ -84,3 +84,8 @@ save-model = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# Bug-finding rules only; the code base does not enforce a formatter or import order.
+select = ["F", "E9", "B", "UP", "SIM"]
+ignore = ["E501", "B905"]  # long lines are tolerated; zip(strict=) is not required
