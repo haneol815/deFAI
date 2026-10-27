@@ -186,3 +186,33 @@ def test_weighted_metrics_averages_numbers_and_lists_and_skips_the_rest():
     assert out["flag"] == pytest.approx(0.25)
     assert "note" not in out and "num-examples" not in out
     assert weighted_metrics([{"a": 1.0}, {"b": 2.0}], [1.0, 1.0], skip="x") == {}  # keys not shared by all
+
+
+# ------------------------------------------------------------------------- fairness across clients
+def eval_reply(msg, acc, n=10):
+    return Message(content=RecordDict({"metrics": MetricRecord({"eval_acc": acc, "eval_loss": 1.0 - acc, "num-examples": n})}), reply_to=msg)
+
+
+def test_evaluation_reports_the_spread_of_accuracy_across_clients_next_to_the_weighted_mean():
+    from defai.strategies.base import client_spread
+
+    strategy = FedAvg(**COMMON)
+    grid = FakeGrid(N, QuadraticClients(TARGETS))
+    messages = list(strategy.configure_evaluate(1, START, ConfigRecord({}), grid))
+    accs = [1.0, 0.9, 0.5, 0.1]
+    sizes = [10, 10, 10, 70]  # the big, badly served client dominates the weighted mean ...
+    out = dict(strategy.aggregate_evaluate(1, [eval_reply(m, a, n) for m, a, n in zip(messages, accs, sizes)]))
+    assert out["eval_acc"] == pytest.approx((1.0 * 10 + 0.9 * 10 + 0.5 * 10 + 0.1 * 70) / 100)
+    # ... while the unweighted spread shows that one client is served far worse than the rest
+    assert out["eval_acc_min"] == pytest.approx(0.1) and out["eval_acc_max"] == pytest.approx(1.0)
+    assert out["eval_acc_std"] == pytest.approx(float(np.std(accs)))
+    assert client_spread([{"x": 1.0}], "eval_acc") == {}  # nothing to report without the metric
+    assert client_spread([{"eval_acc": True}], "eval_acc") == {}  # booleans are flags, not accuracies
+
+
+def test_a_single_evaluating_client_has_zero_spread():
+    strategy = FedAvg(**COMMON)
+    grid = FakeGrid(N, QuadraticClients(TARGETS))
+    (msg, *_) = strategy.configure_evaluate(1, START, ConfigRecord({}), grid)
+    out = dict(strategy.aggregate_evaluate(1, [eval_reply(msg, 0.7)]))
+    assert out["eval_acc_std"] == 0.0 and out["eval_acc_min"] == out["eval_acc_max"] == pytest.approx(0.7)

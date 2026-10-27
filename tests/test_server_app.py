@@ -36,6 +36,8 @@ def test_full_stack_run_writes_a_complete_strict_json_history(tmp_path):
     assert rounds == [0, 1, 2]  # initial evaluation + two rounds
     final = summary["history"][-1]
     assert {"test_acc", "test_loss", "train_loss", "eval_acc", "eval_loss"} <= set(final)
+    assert {"eval_acc_min", "eval_acc_max", "eval_acc_std"} <= set(final)  # per-client spread, not just the mean
+    assert final["eval_acc_min"] <= final["eval_acc"] <= final["eval_acc_max"]
     assert final["test_acc"] > summary["history"][0]["test_acc"]  # learned something on the synthetic task
     assert summary["config"]["strategy"] == "fedavg" and "privacy" not in summary
     assert out.name.startswith("synthetic_fedavg_iid_")

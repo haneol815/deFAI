@@ -87,6 +87,23 @@ def weighted_metrics(metrics: list[dict], weights: list[float], skip: str) -> di
     return out
 
 
+FAIRNESS_METRIC = "eval_acc"
+
+
+def client_spread(metrics: list[dict], key: str) -> dict:
+    """Unweighted min / max / std of ``key`` over clients.
+
+    The weighted mean hides clients the model serves badly, which is the usual failure of
+    federated learning on non-IID data: ``<key>_min`` is the worst client, ``<key>_std`` the
+    disagreement between clients.
+    """
+    values = [m[key] for m in metrics if isinstance(m.get(key), (int, float)) and not isinstance(m.get(key), bool)]
+    if not values:
+        return {}
+    arr = np.asarray(values, dtype=np.float64)
+    return {f"{key}_min": float(arr.min()), f"{key}_max": float(arr.max()), f"{key}_std": float(arr.std())}
+
+
 class FedAvg(Strategy):
     """Federated Averaging (McMahan et al., 2017).
 
@@ -322,4 +339,6 @@ class FedAvg(Strategy):
             return None
         metrics = [dict(m.content[KEY_METRICS]) for m in valid]
         weights = [float(m[self.weighted_by_key]) for m in metrics]
-        return MetricRecord(weighted_metrics(metrics, weights, self.weighted_by_key))
+        aggregated = weighted_metrics(metrics, weights, self.weighted_by_key)
+        aggregated.update(client_spread(metrics, FAIRNESS_METRIC))
+        return MetricRecord(aggregated)
