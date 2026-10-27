@@ -84,13 +84,20 @@ def unique_labels(configs):
     return labels
 
 
-def summarise(paths, target, extra=(), tail=0):
+def group_runs(paths):
+    """Runs that differ only in ``seed`` / ``output-dir`` grouped: [{"config": ..., "runs": [(history, privacy)]}]."""
     groups = {}
     for path in paths:
         config, history, privacy = load(path)
         key = json.dumps({k: v for k, v in config.items() if k not in IGNORED}, sort_keys=True)
-        groups.setdefault(key, {"config": config, "runs": []})["runs"].append((run_stats(history, target, extra, tail), privacy))
-    groups = list(groups.values())
+        groups.setdefault(key, {"config": config, "runs": []})["runs"].append((history, privacy))
+    return list(groups.values())
+
+
+def summarise(paths, target, extra=(), tail=0):
+    groups = group_runs(paths)
+    for group in groups:
+        group["runs"] = [(run_stats(history, target, extra, tail), privacy) for history, privacy in group["runs"]]
     names = unique_labels([g["config"] for g in groups])
     rows = []
     for name, group in zip(names, groups):
