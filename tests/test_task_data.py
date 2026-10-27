@@ -175,6 +175,8 @@ def fake_mirror(monkeypatch):
         labels = (np.arange(sizes[split]) % 10).astype(np.uint8)
         images = rng.integers(0, 256, (sizes[split], 28, 28), dtype=np.uint8)
         images[:, 0, 0] = labels  # the label is readable from the first pixel
+        images[:, 0, 1] = np.arange(sizes[split]) % 256  # and the position in the file from the next two
+        images[:, 0, 2] = np.arange(sizes[split]) // 256
         return images, labels
 
     task._MIRRORED.clear()
@@ -213,3 +215,16 @@ def test_every_dataset_is_either_from_the_hub_a_mirror_or_synthetic():
     for name, spec in task.DATASETS.items():
         assert bool(spec["hf_name"]) + bool(spec.get("mirror")) + (name == "synthetic") == 1, name
         assert (spec.get("mirror") is True) == (name in task.mirror.MIRRORS), name
+
+
+def test_the_training_split_is_shuffled_so_iid_partitions_are_not_contiguous_slices(fake_mirror):
+    cfg = config(dataset="mnist-mirror", partitioner="iid")
+    part = task._partition_source(NUM_PARTITIONS, cfg).load_partition(0)
+    positions = np.array([image[0][1] + 256 * image[0][2] for image in part["image"]])
+    assert len(positions) == 40 and not np.array_equal(np.sort(positions), np.arange(40))
+    assert positions.max() > 100  # drawn from the whole file, not from its first tenth
+    task._MIRRORED.clear()  # the shuffle uses a fixed seed: rebuilding gives the same order
+    again = task._partition_source(NUM_PARTITIONS, cfg).load_partition(0)
+    assert [image[0][1] for image in again["image"]] == [image[0][1] for image in part["image"]]
+    # the test split keeps the order of the file
+    assert [image[0][1] for image in task._mirror_split("mnist-mirror", "test")[:5]["image"]] == [0, 1, 2, 3, 4]

@@ -139,10 +139,15 @@ def _mirror_split(dataset, split):
     """MNIST-like data from defai.mirror as a Hugging Face Dataset (so the Flower partitioners can split it)."""
     if (dataset, split) not in _MIRRORED:
         images, labels = mirror.load_split(dataset, split)
-        _MIRRORED[(dataset, split)] = Dataset.from_dict(
+        data = Dataset.from_dict(
             {"image": images, "label": labels.tolist()},
             features=Features({"image": Array2D((mirror.IMG_SIZE, mirror.IMG_SIZE), "uint8"), "label": ClassLabel(num_classes=NUM_CLASSES)}),
         )
+        if split == "train":
+            # FederatedDataset shuffles the training split (seed 42) before partitioning; the files are not in
+            # random order (MNIST is stored in blocks of writers), so an IID split would otherwise be contiguous slices
+            data = data.shuffle(seed=42)
+        _MIRRORED[(dataset, split)] = data
     return _MIRRORED[(dataset, split)]
 
 
