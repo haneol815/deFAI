@@ -36,7 +36,7 @@ from flwr.supercore import log
 
 from defai.aggregation import Arrays, cast_like, weighted_mean
 from defai.privacy.dp import KEY_UNCLIPPED_BIT
-from defai.records import to_arrays, to_record
+from defai.records import record_bytes, to_arrays, to_record
 
 KEY_ARRAYS = "arrays"
 KEY_CONFIG = "config"
@@ -90,11 +90,6 @@ def weighted_metrics(metrics: list[dict], weights: list[float], skip: str) -> di
 FAIRNESS_METRIC = "eval_acc"
 KEY_UPLOAD_BYTES = "upload-bytes"  # optional client metric: bytes actually sent (set when updates are compressed)
 MB = 2**20
-
-
-def record_bytes(record: ArrayRecord) -> int:
-    """Size of an ArrayRecord's payload, counted like Flower does (``len(array.data)``)."""
-    return sum(len(array.data) for array in record.values())
 
 
 def client_spread(metrics: list[dict], key: str) -> dict:

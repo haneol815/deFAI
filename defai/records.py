@@ -19,3 +19,8 @@ def to_arrays(record: ArrayRecord) -> Arrays:
 def to_record(arrays: Arrays) -> ArrayRecord:
     """dict of ndarrays -> ArrayRecord (key order preserved)."""
     return ArrayRecord({k: Array(np.asarray(v)) for k, v in arrays.items()})
+
+
+def record_bytes(record: ArrayRecord) -> int:
+    """Size of an ArrayRecord's payload, counted like Flower does (``len(array.data)``)."""
+    return sum(len(array.data) for array in record.values())
