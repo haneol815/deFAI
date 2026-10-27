@@ -1,5 +1,7 @@
 # deFAI — Federated Learning Assignment
 
+[![tests](https://github.com/haneol815/deFAI/actions/workflows/tests.yml/badge.svg)](https://github.com/haneol815/deFAI/actions/workflows/tests.yml)
+
 A federated learning (FL) assignment template built on [Flower](https://flower.ai).
 It simulates multiple clients (SuperNodes) on a single machine with the Flower Simulation Engine,
 and the same code can be deployed to a real distributed setup with the Deployment Engine.
