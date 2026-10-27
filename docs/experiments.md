@@ -69,3 +69,40 @@ What can and cannot be concluded:
 Caveat for this table: it was produced before commit `6b49a2e` ("Shuffle the mirrored training split before
 partitioning"). That fix changes which images a client holds, not how many of each class (checked with
 `partition_stats.py`: the class counts are identical), and it was not re-run. Seed 3 of the grid was not run, to save time.
+
+
+## E3: central differential privacy (adaptive clipping)
+
+MNIST, IID split over 100 clients, 50 sampled per round, 10 rounds, FedAvg with server-side clipping whose norm adapts
+to the median update norm (`dp='adaptive'`, target quantile 0.5, initial clip norm 1.0), Gaussian noise with
+multiplier `z`, δ = 1e-5. The privacy unit is the client.
+
+```bash
+python scripts/run_grid.py --output-dir results/dp --seeds 1 2 --num-supernodes 100 \
+  --base "dataset='mnist-mirror' partitioner='iid' num-server-rounds=10" \
+  --vary "dp='none'" "dp='adaptive' dp-noise-multiplier=0.5" "dp='adaptive' dp-noise-multiplier=1.0" "dp='adaptive' dp-noise-multiplier=2.0"
+python scripts/compare.py results/dp/*/history.json --tail 3 --extra dp-epsilon dp-clip-norm eval_acc_min --target 0.9 --markdown
+```
+
+| run                                               | runs | final acc     | last-3 mean   | best acc      | rounds to 0.9 | dp-epsilon     | dp-clip-norm  | eval_acc_min  |
+| ------------------------------------------------- | ---- | ------------- | ------------- | ------------- | ------------- | -------------- | ------------- | ------------- |
+| fedavg                           | 2    | 0.874 ± 0.005 | 0.861 ± 0.004 | 0.874 ± 0.005 | -             | -              | -             | 0.808 ± 0.012 |
+| fedavg DP (z=0.5) | 2    | 0.896 ± 0.004 | 0.885 ± 0.001 | 0.896 ± 0.004 | -             | 48.802 ± 0.000 | 0.415 ± 0.005 | 0.837 ± 0.018 |
+| fedavg DP (z=1.0) | 2    | 0.903 ± 0.001 | 0.890 ± 0.001 | 0.906 ± 0.005 | 9.5 (2/2)     | 19.054 ± 0.000 | 0.415 ± 0.005 | 0.833 ± 0.024 |
+| fedavg DP (z=2.0) | 2    | 0.825 ± 0.008 | 0.803 ± 0.001 | 0.832 ± 0.002 | -             | 8.079 ± 0.000  | 0.421 ± 0.004 | 0.750 ± 0.000 |
+
+- **ε depends only on `z`, the number of rounds and δ**, not on the data or the seed: 48.8, 19.1 and 8.1 for
+  `z` = 0.5, 1, 2. The accountant is the conservative one of this repository (no credit for sampling 50 of 100
+  clients per round), so these are upper bounds, but none of them is a strong guarantee. Reaching a small ε needs
+  many more clients per round or a much larger `z`.
+- **For `z` ≤ 1 the DP runs lost no accuracy in these ten rounds:** 0.90 against 0.87 for FedAvg without DP, in both
+  seeds. This is not a claim that DP helps. The baseline is simply not converged (it still gains about 0.01 per
+  round) and the adaptive clip norm shrinks from 1.0 to about 0.42; why the clipped runs end ahead was not
+  investigated. They are slower at the start (rounds 2 to 4), presumably because the noise scales with the clip norm,
+  which starts at 1.0.
+- **`z` = 2 costs about 0.07 to 0.08 accuracy** (0.825 against 0.903 at `z` = 1), and the worst client's accuracy
+  drops with it (`eval_acc_min` 0.75).
+- The noise per coordinate is `z · C / m` = 0.004 to 0.018; with 1.66 M parameters the noise vector is far longer than
+  the clipped update, and training still works. That is the usual picture for DP-FedAvg with many clients per round.
+- Caveats: ten rounds, IID data, two seeds, one dataset. The numbers say nothing about non-IID data, where clipping
+  and noise interact with the heterogeneity.
