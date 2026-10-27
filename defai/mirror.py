@@ -7,10 +7,14 @@ simulation read them from disk. Nothing here depends on Flower or torch.
 
 import gzip
 import hashlib
+import http.client
 import os
 import struct
 import tempfile
+import time
+import urllib.error
 import urllib.request
+import warnings
 
 import numpy as np
 
@@ -50,25 +54,48 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def fetch(name: str, filename: str, directory: str | None = None, urlopen=urllib.request.urlopen) -> bytes:
+def _download(url: str, urlopen, retries: int, sleep) -> bytes:
+    """Body of ``url``; connection problems and server errors are retried with a growing pause."""
+    for attempt in range(retries):
+        try:
+            with urlopen(url, timeout=120) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code < 500 or attempt == retries - 1:  # a missing file will not appear on the second try
+                raise
+        except (OSError, http.client.HTTPException):  # reset connection, timeout, truncated body
+            if attempt == retries - 1:
+                raise
+        sleep(2**attempt)
+
+
+def fetch(name: str, filename: str, directory: str | None = None, urlopen=urllib.request.urlopen, retries: int = 3, sleep=time.sleep) -> bytes:
     """Contents of one archive: from the cache if it is intact, otherwise downloaded, verified and cached."""
     mirror = MIRRORS[name]
     expected = mirror["sha256"][filename]
     path = os.path.join(directory or cache_dir(), name, filename)
-    if os.path.exists(path):
+    try:
         with open(path, "rb") as f:
             data = f.read()
         if _sha256(data) == expected:
             return data
-    with urlopen(mirror["url"] + filename, timeout=120) as response:
-        data = response.read()
+    except OSError:
+        pass  # not cached yet, or not readable: download it
+    data = _download(mirror["url"] + filename, urlopen, retries, sleep)
     if _sha256(data) != expected:
         raise ValueError(f"{mirror['url'] + filename}: checksum mismatch, refusing to use the download")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))  # write-then-rename: parallel clients never see half a file
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    tmp = None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))  # write-then-rename: parallel clients never see half a file
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o644)  # mkstemp creates 0600; other users of a shared cache need to read it
+        os.replace(tmp, path)
+    except OSError as error:  # the data is verified and in memory: failing to cache it is not fatal
+        if tmp is not None and os.path.exists(tmp):
+            os.unlink(tmp)
+        warnings.warn(f"could not cache {filename} in {os.path.dirname(path)}: {error}", stacklevel=2)
     return data
 
 

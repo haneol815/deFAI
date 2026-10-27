@@ -123,3 +123,91 @@ def test_load_split_rejects_labels_outside_the_ten_classes(tiny_mnist, tmp_path,
     monkeypatch.setitem(mirror.MIRRORS["test-mirror"]["sha256"], name, hashlib.sha256(server.files[url]).hexdigest())
     with pytest.raises(ValueError, match="unexpected shapes"):
         mirror.load_split("test-mirror", "train", str(tmp_path), server)
+
+
+class Flaky:
+    """urlopen that raises the given errors on its first calls, then serves ``inner``."""
+
+    def __init__(self, inner, errors):
+        self.inner, self.errors, self.calls = inner, list(errors), 0
+
+    def __call__(self, url, timeout):
+        self.calls += 1
+        if self.errors:
+            raise self.errors.pop(0)
+        return self.inner(url, timeout)
+
+
+def test_transient_download_errors_are_retried_with_a_growing_pause(tiny_mnist, tmp_path):
+    import http.client
+    import urllib.error
+
+    _, _, server = tiny_mnist
+    name = mirror.SPLIT_FILES["test"][0]
+    pauses = []
+    flaky = Flaky(server, [urllib.error.URLError("reset"), http.client.IncompleteRead(b"x")])
+    assert mirror.fetch("test-mirror", name, str(tmp_path), flaky, sleep=pauses.append) == server.files["https://example.test/" + name]
+    assert flaky.calls == 3 and pauses == [1, 2]
+    always = Flaky(server, [OSError("down")] * 5)
+    with pytest.raises(OSError, match="down"):
+        mirror.fetch("test-mirror", mirror.SPLIT_FILES["test"][1], str(tmp_path), always, retries=3, sleep=pauses.append)
+    assert always.calls == 3
+
+
+def test_a_missing_file_is_not_retried_but_a_server_error_is(tiny_mnist, tmp_path):
+    import urllib.error
+
+    _, _, server = tiny_mnist
+    name = mirror.SPLIT_FILES["train"][0]
+    missing = Flaky(server, [urllib.error.HTTPError("u", 404, "not found", {}, None)] * 3)
+    with pytest.raises(urllib.error.HTTPError):
+        mirror.fetch("test-mirror", name, str(tmp_path), missing, sleep=lambda s: None)
+    assert missing.calls == 1
+    broken = Flaky(server, [urllib.error.HTTPError("u", 503, "busy", {}, None)] * 2)
+    assert mirror.fetch("test-mirror", name, str(tmp_path), broken, sleep=lambda s: None)
+    assert broken.calls == 3
+
+
+def test_cached_files_are_readable_by_other_users_and_leave_no_temp_files(tiny_mnist, tmp_path):
+    import stat
+
+    _, _, server = tiny_mnist
+    name = mirror.SPLIT_FILES["test"][0]
+    mirror.fetch("test-mirror", name, str(tmp_path), server)
+    files = list((tmp_path / "test-mirror").iterdir())
+    assert [f.name for f in files] == [name] and stat.S_IMODE(files[0].stat().st_mode) == 0o644
+
+
+def test_an_unusable_cache_directory_costs_a_warning_not_the_data(tiny_mnist, tmp_path):
+    _, _, server = tiny_mnist
+    name = mirror.SPLIT_FILES["test"][0]
+    (tmp_path / "test-mirror").write_text("a file where the cache directory should be")
+    with pytest.warns(UserWarning, match="could not cache"):
+        data = mirror.fetch("test-mirror", name, str(tmp_path), server)
+    assert data == server.files["https://example.test/" + name]
+
+
+def test_a_failed_write_removes_its_temporary_file(tiny_mnist, tmp_path, monkeypatch):
+    _, _, server = tiny_mnist
+    name = mirror.SPLIT_FILES["test"][0]
+
+    def full_disk(path, mode):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(mirror.os, "chmod", full_disk)
+    with pytest.warns(UserWarning, match="no space left"):
+        mirror.fetch("test-mirror", name, str(tmp_path), server)
+    assert list((tmp_path / "test-mirror").iterdir()) == []
+
+
+def test_an_unreadable_cache_file_is_downloaded_again(tiny_mnist, tmp_path):
+    import os
+
+    _, _, server = tiny_mnist
+    name = mirror.SPLIT_FILES["test"][0]
+    path = tmp_path / "test-mirror" / name
+    path.parent.mkdir()
+    path.mkdir()  # reading a directory raises OSError, like a file without read permission
+    with pytest.warns(UserWarning, match="could not cache"):  # replacing a directory with a file is refused as well
+        assert mirror.fetch("test-mirror", name, str(tmp_path), server) == server.files["https://example.test/" + name]
+    assert os.path.isdir(path)
