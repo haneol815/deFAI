@@ -117,3 +117,141 @@ def test_partition_stats_can_save_a_heat_map(tmp_path, capsys):
     png = tmp_path / "p.png"
     stats.main(["--num-partitions", "4", "--plot", str(png)])
     assert png.exists() and png.stat().st_size > 1000
+
+
+def test_run_grid_parses_run_config_fragments():
+    grid = load_script("run_grid")
+    parsed = grid.parse_assignments("strategy='fedavg' lr=0.5 rounds=3 on=true off=false path='a b'")
+    assert parsed == {"strategy": "fedavg", "lr": 0.5, "rounds": 3, "on": True, "off": False, "path": "a b"}
+    assert grid.parse_assignments("") == {}
+    assert grid.format_run_config({"strategy": "fedavg", "lr": 1e-05, "on": True, "n": 3}) == "strategy='fedavg' lr=1e-05 on=true n=3"
+    with pytest.raises(ValueError, match="key=value"):
+        grid.parse_assignments("strategy")
+    with pytest.raises(ValueError, match="key=value"):
+        grid.parse_assignments("=3")
+
+
+@pytest.fixture
+def fake_flwr(monkeypatch):
+    """Replace `flwr run` by a function that writes the history.json a successful ServerApp would write."""
+    import tomllib
+
+    calls = []
+
+    def install(grid, writes=True):
+        def run(command, stdout, stderr, env, timeout, check):
+            run_config = command[command.index("--run-config") + 1]
+            cfg = tomllib.loads(run_config.replace(" ", "\n"))  # independent of run_grid's own parser
+            calls.append({"command": command, "env": env, "timeout": timeout, "cfg": cfg})
+            full = {"strategy": "fedavg", "dataset": "synthetic", "partitioner": "iid", "attack": "none", "num-malicious": 0, "dp": "none", **cfg}  # what the server records
+            stdout.write("fake flwr output\n")
+            if writes:
+                out = Path(cfg["output-dir"]) / f"run{len(calls)}"
+                out.mkdir(parents=True)
+                (out / "history.json").write_text(json.dumps({"config": full, "history": [{"round": 1, "test_acc": 0.5}]}))
+            return None
+
+        monkeypatch.setattr(grid.subprocess, "run", run)
+        return calls
+
+    return install
+
+
+GRID_ARGS = ["--seeds", "1", "2", "--num-supernodes", "4", "--base", "dataset='synthetic' num-server-rounds=3",
+             "--vary", "strategy='fedavg'", "strategy='scaffold' qfedavg-q=0.5"]
+
+
+def test_run_grid_runs_every_variant_and_seed_and_resumes(tmp_path, fake_flwr, capsys):
+    grid = load_script("run_grid")
+    calls = fake_flwr(grid)
+    assert grid.main(["--output-dir", str(tmp_path), *GRID_ARGS]) == 0
+    assert [(c["cfg"]["seed"], c["cfg"]["strategy"]) for c in calls] == [(1, "fedavg"), (1, "scaffold"), (2, "fedavg"), (2, "scaffold")]
+    first = calls[1]
+    assert first["command"][:3] == ["flwr", "run", grid.PROJECT_DIR] and "--stream" in first["command"]
+    assert first["command"][first["command"].index("--federation-config") + 1] == "num-supernodes=4"
+    assert first["cfg"] == {"dataset": "synthetic", "num-server-rounds": 3, "strategy": "scaffold", "qfedavg-q": 0.5,
+                            "seed": 1, "output-dir": str(tmp_path)}
+    assert first["env"]["FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION"] == "1" and first["timeout"] == 1800
+    assert (tmp_path / "logs" / "002_seed1.log").read_text() == "fake flwr output\n"
+    out = capsys.readouterr().out
+    assert "4 run, 0 skipped, 0 failed" in out and "fedavg synthetic" in out  # summarised with compare.py
+
+    # the same grid again does nothing; one more seed only runs the new seed
+    assert grid.main(["--output-dir", str(tmp_path), *GRID_ARGS]) == 0
+    assert len(calls) == 4 and "0 run, 4 skipped" in capsys.readouterr().out
+    assert grid.main(["--output-dir", str(tmp_path), *GRID_ARGS[:1], "1", "2", "3", *GRID_ARGS[3:]]) == 0
+    assert [c["cfg"]["seed"] for c in calls[4:]] == [3, 3]
+    # --no-resume repeats everything, even though the history.json files get overwritten or added
+    assert grid.main(["--output-dir", str(tmp_path), "--no-resume", *GRID_ARGS]) == 0
+    assert len(calls) == 10 and "4 run, 0 skipped" in capsys.readouterr().out
+
+
+def test_run_grid_install_deps_leaves_the_environment_alone(tmp_path, fake_flwr, monkeypatch):
+    grid = load_script("run_grid")
+    monkeypatch.delenv("FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION", raising=False)
+    calls = fake_flwr(grid)
+    grid.main(["--output-dir", str(tmp_path), "--seeds", "1", "--install-deps", "--timeout", "7"])
+    assert "FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION" not in calls[0]["env"] and calls[0]["timeout"] == 7
+
+
+def test_run_grid_reports_runs_that_wrote_no_results(tmp_path, fake_flwr, capsys):
+    # `flwr run` exits with 0 even when the ServerApp fails, so only a new history.json counts as success
+    grid = load_script("run_grid")
+    calls = fake_flwr(grid, writes=False)
+    assert grid.main(["--output-dir", str(tmp_path), *GRID_ARGS]) == 1
+    out = capsys.readouterr().out
+    assert len(calls) == 4 and "0 run, 0 skipped, 4 failed (runs [1, 2, 3, 4])" in out and "FAILED" in out
+    assert "compare" not in out  # nothing to summarise
+
+
+def test_run_grid_survives_a_timeout_and_unreadable_results(tmp_path, monkeypatch, capsys):
+    grid = load_script("run_grid")
+
+    def hang(command, **kwargs):
+        raise grid.subprocess.TimeoutExpired(command, 1)
+
+    monkeypatch.setattr(grid.subprocess, "run", hang)
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "history.json").write_text("{ half written")  # must not stop a resumed grid
+    assert grid.main(["--output-dir", str(tmp_path), "--seeds", "1", "--timeout", "1"]) == 1
+    assert "timed out after 1s" in capsys.readouterr().out
+
+
+def test_run_grid_dry_run_only_prints_the_commands(tmp_path, fake_flwr, capsys):
+    grid = load_script("run_grid")
+    calls = fake_flwr(grid)
+    assert grid.main(["--output-dir", str(tmp_path), "--dry-run", *GRID_ARGS]) == 0
+    out = capsys.readouterr().out
+    assert calls == [] and out.count("flwr run") == 4 and "seed=2" in out
+    assert "0 run, 0 skipped, 0 failed" in out and not list(tmp_path.glob("*/history.json"))
+
+
+def test_run_grid_only_skips_runs_with_the_same_seed_and_settings(tmp_path, fake_flwr):
+    grid = load_script("run_grid")
+    write_run(tmp_path, "old", [0.5], seed=1, **{"num-server-rounds": 3})
+    assert grid.already_done(str(tmp_path), {"strategy": "fedavg", "seed": 1, "num-server-rounds": 3})
+    assert not grid.already_done(str(tmp_path), {"strategy": "fedavg", "seed": 2, "num-server-rounds": 3})
+    assert not grid.already_done(str(tmp_path), {"strategy": "fedavg", "seed": 1, "num-server-rounds": 5})
+    assert not grid.already_done(str(tmp_path), {"strategy": "fedavg", "seed": 1, "not-in-config": 1})
+
+
+def test_run_grid_counts_a_rewritten_history_as_success(tmp_path, monkeypatch, capsys):
+    # two runs that get the same results directory name: the second overwrites the first one's history.json
+    import os
+
+    grid = load_script("run_grid")
+    path = tmp_path / "same_name" / "history.json"
+    path.parent.mkdir()
+    cfg = {"strategy": "fedavg", "dataset": "synthetic", "partitioner": "iid", "attack": "none", "num-malicious": 0, "dp": "none"}
+
+    def run(command, stdout, **kwargs):
+        path.write_text(json.dumps({"config": cfg, "history": [{"round": 1, "test_acc": 0.5}]}))
+        os.utime(path, ns=(1 + len(calls), 1 + len(calls)))  # a different mtime each time, whatever the clock resolution
+        calls.append(command)
+
+    calls = []
+    monkeypatch.setattr(grid.subprocess, "run", run)
+    path.write_text("{}")
+    assert grid.main(["--output-dir", str(tmp_path), "--seeds", "1", "--no-resume"]) == 0
+    assert grid.main(["--output-dir", str(tmp_path), "--seeds", "1", "--no-resume"]) == 0
+    assert len(calls) == 2 and "1 run, 0 skipped, 0 failed" in capsys.readouterr().out
