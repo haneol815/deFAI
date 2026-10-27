@@ -41,7 +41,7 @@ strategy = "fedavg"
 fraction-train = 0.5        # fraction of SuperNodes sampled per round
 fraction-evaluate = 0.5
 # data
-dataset = "mnist"           # mnist | cifar10 | synthetic (offline, for smoke tests)
+dataset = "mnist"           # mnist | cifar10 | mnist-mirror | fashion-mnist-mirror | synthetic (offline, for smoke tests)
 partitioner = "iid"         # iid | dirichlet
 dirichlet-alpha = 0.5       # smaller = more non-IID
 seed = 42

@@ -5,6 +5,7 @@ It simulates multiple clients (SuperNodes) on a single machine with the Flower S
 and the same code can be deployed to a real distributed setup with the Deployment Engine.
 
 - Datasets: MNIST, CIFAR-10 (downloaded and partitioned with [Flower Datasets](https://flower.ai/docs/datasets/)),
+  MNIST and Fashion-MNIST from plain-file mirrors (`mnist-mirror`, `fashion-mnist-mirror`, no Hugging Face needed),
   plus an offline `synthetic` dataset for smoke tests
 - Partitioning: IID, Dirichlet non-IID
 - Algorithms (all implemented in this repo against Flower's `Strategy` interface — see [Algorithms](#algorithms)):
@@ -82,7 +83,13 @@ flwr run . --stream --federation-config "num-supernodes=10" \
 - `history.json` is strict JSON: non-finite numbers (e.g. an infinite epsilon) are written as `null`.
 - A `ServerApp` exception does not change the exit code of `flwr run`; look for a `Traceback` in the log.
 - `dataset='synthetic'` generates MNIST-like images locally, so a run needs no download. This is handy for smoke tests
-  and in environments without access to Hugging Face.
+  and in environments without access to Hugging Face. It is too easy to compare algorithms on, though: every one of
+  them reaches 100% accuracy within a few rounds.
+- `dataset='mnist-mirror'` and `'fashion-mnist-mirror'` are the original MNIST / Fashion-MNIST IDX archives, downloaded
+  by `defai/mirror.py` from the mirrors torchvision (S3) and Keras (GCS) use, verified against pinned SHA-256 sums and
+  cached in `~/.cache/defai` (`DEFAI_DATA_DIR` changes it). They are the standard 60k/10k splits (Fashion-MNIST is a harder task than
+  MNIST) and work where the Hugging Face hub cannot be reached. The files are fetched by the first process that
+  needs them, so run once locally before starting a long grid. CIFAR-10 has no such mirror here.
 - Recent Flower versions build a fresh virtual environment per `flwr run` and reinstall the app's dependencies.
   To reuse the current environment instead (much faster, and works offline), run with
   `FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1`.
