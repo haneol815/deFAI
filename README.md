@@ -105,6 +105,7 @@ flwr run . --stream --federation-config "num-supernodes=10" \
 pip install -e ".[plot]"
 python scripts/plot.py results/*/history.json -o results/acc.png
 python scripts/plot.py results/*/history.json -m dp-epsilon -o results/eps.png   # any history key
+python scripts/plot.py results/*/history.json --group -o results/acc.png        # one curve per configuration: mean ± std over seeds
 python scripts/compare.py results/*/history.json --target 0.95                   # one row per configuration
 python scripts/compare.py results/*/history.json --extra eval_acc_min comm-mb-total --markdown  # more columns, as a Markdown table
 python scripts/compare.py results/*/history.json --tail 3                          # accuracy averaged over the last 3 rounds (steadier than the final one)
