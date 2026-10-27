@@ -4,8 +4,9 @@ The server decides which federated algorithm the client runs by what it puts int
 train message: ``proximal-mu`` (FedProx), a ``c`` control variate (SCAFFOLD),
 ``moon-mu`` (MOON), ``report-initial-loss`` (q-FedAvg) and ``dp-clip-norm`` (client-side
 DP clipping). Algorithms that need memory between rounds keep it in ``context.state``.
-The run config adds simulated misbehaviour (``attack``, ``dropout-rate``) and update
-compression (``compression``), applied last, just before the update is sent.
+The run config adds simulated misbehaviour (``attack``, ``dropout-rate``), update
+compression (``compression``), applied last, just before the update is sent, and
+personalisation metrics at evaluation time (``personalize-epochs``).
 """
 
 import copy
@@ -182,17 +183,20 @@ def train(msg: Message, context: Context):
 @app.evaluate()
 def evaluate(msg: Message, context: Context):
     cfg = context.run_config
+    partition_id = context.node_config["partition-id"]
+    device = get_device()
     model = build_model(cfg["dataset"])
     model.load_state_dict(msg.content["arrays"].to_torch_state_dict())
-    _, valloader = load_client_data(
-        context.node_config["partition-id"], context.node_config["num-partitions"], cfg
-    )
-    loss, acc = test_fn(model, valloader, get_device())
-    content = RecordDict({
-        "metrics": MetricRecord({
-            "eval_loss": loss,
-            "eval_acc": acc,
-            "num-examples": len(valloader.dataset),
-        }),
-    })
-    return Message(content=content, reply_to=msg)
+    trainloader, valloader = load_client_data(partition_id, context.node_config["num-partitions"], cfg)
+    loss, acc = test_fn(model, valloader, device)
+    metrics = {"eval_loss": loss, "eval_acc": acc, "num-examples": len(valloader.dataset)}
+
+    if cfg["personalize-epochs"] > 0:
+        # Personalisation gap: how much a few local epochs on top of the *received* global model help
+        # on this client's held-out data. The global model itself is evaluated above and left untouched.
+        seed = [cfg["seed"], partition_id, msg.content["config"]["server-round"], 3]
+        torch.manual_seed(int(np.random.SeedSequence(seed).generate_state(1)[0]))
+        train_fn(model, trainloader, cfg["personalize-epochs"], cfg["learning-rate"], device)
+        metrics["eval_loss_personalized"], metrics["eval_acc_personalized"] = test_fn(model, valloader, device)
+
+    return Message(content=RecordDict({"metrics": MetricRecord(metrics)}), reply_to=msg)

@@ -48,6 +48,7 @@ RANGES = {
     "multikrum-select": (lambda v: v >= 1, ">= 1"),
     "num-malicious": (lambda v: v >= 0, ">= 0"),
     "dropout-rate": (lambda v: 0 <= v <= 1, "in [0, 1]"),
+    "personalize-epochs": (lambda v: v >= 0, ">= 0"),
     "compression-ratio": (lambda v: 0 < v <= 1, "in (0, 1]"),
     "compression-bits": (lambda v: 2 <= v <= 16, "in [2, 16]"),
     "dp-noise-multiplier": (lambda v: v >= 0, ">= 0"),

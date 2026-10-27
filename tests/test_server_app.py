@@ -107,3 +107,11 @@ def test_compressed_uploads_are_accounted_at_their_real_size_and_training_still_
     assert all(row["comm-mb-up"] < 0.5 * row["comm-mb-down"] for row in rounds)   # ~0.4 bytes/param vs ~4 dense
     assert all(0.0 < row["compression-error"] < 1.0 for row in rounds)
     assert summary["history"][-1]["test_acc"] > summary["history"][0]["test_acc"] + 0.1
+
+
+def test_personalisation_metrics_reach_the_history_next_to_the_global_ones(tmp_path):
+    _, summary, _ = run(tmp_path, partitioner="dirichlet", **{"dirichlet-alpha": 0.1, "personalize-epochs": 1, "num-server-rounds": 2})
+    final = summary["history"][-1]
+    assert {"eval_acc", "eval_acc_personalized", "eval_acc_personalized_min", "eval_acc_personalized_std"} <= set(final)
+    # on skewed clients a local epoch on top of the global model should not make them worse on average
+    assert final["eval_acc_personalized"] >= final["eval_acc"] - 0.05

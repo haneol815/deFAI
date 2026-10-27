@@ -36,6 +36,7 @@ def test_default_config_is_valid():
         ({"lr-decay": 0.0}, "lr-decay"),
         ({"qfedavg-q": -1.0}, "qfedavg-q"),
         ({"compression": "gzip"}, "compression"),
+        ({"personalize-epochs": -1}, "personalize-epochs"),
         ({"compression-ratio": 0.0}, "compression-ratio"),
         ({"compression-bits": 1}, "compression-bits"),
         ({"learning-rate": 0.0}, "learning-rate"),

@@ -70,6 +70,8 @@ multikrum-select = 3        # multikrum: number of updates averaged
 attack = "none"             # none | label-flip | sign-flip | gaussian
 num-malicious = 0
 attack-scale = 1.0          # sign-flip: multiplier; gaussian: std of the replacement update
+# personalisation (evaluation only): fine-tune the received model locally, then report eval_acc_personalized
+personalize-epochs = 0      # local epochs of fine-tuning before evaluating (0 = off)
 # communication: lossy compression of the client update (simulated; the cost is reported in comm-mb-up)
 compression = "none"        # none | topk | quantize
 compression-ratio = 0.1     # topk: fraction of the update entries that are kept

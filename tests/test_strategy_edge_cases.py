@@ -309,3 +309,16 @@ def test_strategies_can_require_a_client_metric_and_drop_replies_without_it(capl
         w, _ = aggregate(strategy, bad + [with_steps(messages[3])])
     assert caplog.text.count("'local-steps' must be a positive finite number") == 3
     np.testing.assert_allclose(w, 1.0)  # only the one valid reply took part
+
+
+def test_the_spread_is_also_reported_for_the_personalised_accuracy():
+    strategy = FedAvg(**COMMON)
+    grid = FakeGrid(N, QuadraticClients(TARGETS))
+    messages = list(strategy.configure_evaluate(1, START, ConfigRecord({}), grid))
+    replies = [
+        Message(content=RecordDict({"metrics": MetricRecord({"eval_acc": a, "eval_acc_personalized": p, "num-examples": 10})}), reply_to=m)
+        for m, a, p in zip(messages, [0.2, 0.4, 0.4, 0.6], [0.8, 0.9, 0.7, 1.0])
+    ]
+    out = dict(strategy.aggregate_evaluate(1, replies))
+    assert out["eval_acc"] == pytest.approx(0.4) and out["eval_acc_personalized"] == pytest.approx(0.85)
+    assert out["eval_acc_personalized_min"] == pytest.approx(0.7) and out["eval_acc_min"] == pytest.approx(0.2)

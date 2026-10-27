@@ -87,7 +87,7 @@ def weighted_metrics(metrics: list[dict], weights: list[float], skip: str) -> di
     return out
 
 
-FAIRNESS_METRIC = "eval_acc"
+FAIRNESS_METRICS = ("eval_acc", "eval_acc_personalized")
 KEY_UPLOAD_BYTES = "upload-bytes"  # optional client metric: bytes actually sent (set when updates are compressed)
 MB = 2**20
 
@@ -375,5 +375,6 @@ class FedAvg(Strategy):
         metrics = [dict(m.content[KEY_METRICS]) for m in valid]
         weights = [float(m[self.weighted_by_key]) for m in metrics]
         aggregated = weighted_metrics(metrics, weights, self.weighted_by_key)
-        aggregated.update(client_spread(metrics, FAIRNESS_METRIC))
+        for key in FAIRNESS_METRICS:
+            aggregated.update(client_spread(metrics, key))
         return MetricRecord(aggregated)

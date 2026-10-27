@@ -353,3 +353,38 @@ def test_a_dropped_client_does_not_touch_its_error_feedback_state():
     cfg = config(compression="topk", **{"compression-ratio": 0.05, "error-feedback": True, "dropout-rate": 1.0})
     reply, ctx = run_train(cfg)
     assert reply.has_error() and STATE_EF_RESIDUAL not in ctx.state
+
+
+# ------------------------------------------------------------------------------ personalisation
+def evaluate_message():
+    return Message(
+        content=RecordDict({"arrays": GLOBAL, "config": ConfigRecord({"server-round": 1})}),
+        message_type=MessageType.EVALUATE,
+        dst_node_id=1,
+    )
+
+
+def run_evaluate(cfg, partition_id=0):
+    return client_app.evaluate(evaluate_message(), context(cfg, partition_id)).content["metrics"]
+
+
+def test_personalized_metrics_appear_only_when_asked_for():
+    assert "eval_acc_personalized" not in run_evaluate(config())
+    metrics = run_evaluate(config(**{"personalize-epochs": 1}))
+    assert {"eval_acc_personalized", "eval_loss_personalized"} <= set(metrics)
+
+
+def test_fine_tuning_on_skewed_local_data_beats_the_global_model_and_leaves_it_unchanged():
+    skewed = config(partitioner="dirichlet", **{"dirichlet-alpha": 0.05, "learning-rate": 0.05})
+    plain = run_evaluate(skewed)
+    tuned = run_evaluate({**skewed, "personalize-epochs": 2})
+    # the untrained global model is near chance; two local epochs on a client's few classes help a lot
+    assert tuned["eval_acc_personalized"] > tuned["eval_acc"] + 0.2
+    assert tuned["eval_loss_personalized"] < tuned["eval_loss"]
+    # evaluating the received model is unaffected by the personalisation step
+    assert tuned["eval_acc"] == plain["eval_acc"] and tuned["eval_loss"] == pytest.approx(plain["eval_loss"])
+
+
+def test_personalisation_is_reproducible():
+    cfg = config(**{"personalize-epochs": 1})
+    assert run_evaluate(cfg) == run_evaluate(cfg)
