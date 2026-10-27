@@ -97,3 +97,23 @@ def test_scripts_handle_null_epsilon_from_unbounded_runs(tmp_path):
         plot.main()  # all values null -> an empty curve, not a crash
     finally:
         sys.argv = old
+
+
+def test_partition_stats_prints_a_table_and_the_skew(capsys):
+    stats = load_script("partition_stats")
+    stats.main(["--dataset", "synthetic", "--partitioner", "dirichlet", "--alpha", "0.1", "--num-partitions", "5"])
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "dataset=synthetic partitioner=dirichlet alpha=0.1 clients=5 seed=42"
+    rows = [line.split() for line in out[2:7]]
+    assert [r[0] for r in rows] == ["0", "1", "2", "3", "4"] and sum(int(r[1]) for r in rows) == 3000
+    assert out[-1].startswith("mean max-class share:") and float(out[-1].split(":")[1].split()[0]) > 0.4  # alpha 0.1 is skewed
+    stats.main(["--partitioner", "iid", "--num-partitions", "5"])
+    assert "partitioner=iid clients=5" in capsys.readouterr().out  # no alpha shown for IID
+
+
+def test_partition_stats_can_save_a_heat_map(tmp_path, capsys):
+    pytest.importorskip("matplotlib")
+    stats = load_script("partition_stats")
+    png = tmp_path / "p.png"
+    stats.main(["--num-partitions", "4", "--plot", str(png)])
+    assert png.exists() and png.stat().st_size > 1000
