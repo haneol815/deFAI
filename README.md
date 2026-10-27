@@ -93,17 +93,20 @@ python scripts/plot.py results/*/history.json -o results/acc.png
 python scripts/plot.py results/*/history.json -m dp-epsilon -o results/eps.png   # any history key
 python scripts/compare.py results/*/history.json --target 0.95                   # one row per configuration
 ```
-`compare.py` groups runs that differ only in `seed` and reports mean ± std, so comparing algorithms is a loop away
-(a single seed is too noisy to rank algorithms, especially on non-IID data):
+`compare.py` groups runs that differ only in `seed` and reports mean ± std (a single seed is too noisy to rank
+algorithms, especially on non-IID data). `scripts/run_grid.py` runs such a grid, variants × seeds, and calls
+`compare.py` at the end:
 ```bash
-for seed in 1 2 3; do
-  for s in fedavg fedprox scaffold moon; do
-    flwr run . --stream --federation-config "num-supernodes=10" \
-      --run-config "strategy='$s' partitioner='dirichlet' dirichlet-alpha=0.1 num-server-rounds=30 seed=$seed"
-  done
-done
-python scripts/compare.py results/*/history.json
+python scripts/run_grid.py --output-dir results/noniid --seeds 1 2 3 --num-supernodes 10 \
+  --base "partitioner='dirichlet' dirichlet-alpha=0.1 num-server-rounds=30" \
+  --vary "strategy='fedavg'" "strategy='fedprox'" "strategy='scaffold'" "strategy='moon'"
 ```
+Every `--vary` fragment is added to `--base` (same `key=value` syntax as `--run-config`), `seed` and `output-dir` are
+set per run, and logs go to `<output-dir>/logs/`. The grid is resumable: runs whose results (same settings, same seed)
+are already in `--output-dir` are skipped, so an interrupted grid continues where it stopped (`--no-resume` repeats
+everything, `--dry-run` only prints the commands). `flwr run` exits with 0 even when the ServerApp fails, so a run counts
+as successful only if it wrote a `history.json`; the script exits with 1 if any run did not. It sets
+`FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1` for the runs unless `--install-deps` is given.
 
 ## Reading `history.json`
 One row per round (round 0 is the initial model), merged from three sources:
