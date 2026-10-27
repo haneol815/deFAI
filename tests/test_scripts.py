@@ -14,10 +14,13 @@ def load_script(name):
     return module
 
 
-def write_run(tmp_path, name, accs, seed=0, privacy=None, **config):
+def write_run(tmp_path, name, accs, seed=0, privacy=None, columns=None, **config):
     cfg = {"strategy": "fedavg", "dataset": "synthetic", "partitioner": "iid", "seed": seed,
            "output-dir": str(tmp_path), "attack": "none", "num-malicious": 0, "dp": "none", **config}
     history = [{"round": i, "test_acc": a} for i, a in enumerate(accs)]
+    for key, values in (columns or {}).items():  # extra per-round metrics, one value (or None) per round
+        for row, value in zip(history, values):
+            row[key] = value
     path = tmp_path / name / "history.json"
     path.parent.mkdir()
     path.write_text(json.dumps({"config": cfg, "history": history, **({"privacy": privacy} if privacy else {})}))
@@ -40,6 +43,34 @@ def test_compare_groups_seeds_and_reports_mean_std(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "fedavg synthetic iid" in out and "rounds to 0.9" in out
     assert (tmp_path / "t.csv").read_text().startswith("run,runs,final")
+
+
+def test_compare_adds_columns_for_any_history_key(tmp_path, capsys):
+    compare = load_script("compare")
+    paths = [
+        write_run(tmp_path, "a0", [0.1, 0.5], seed=0, columns={"eval_acc_min": [0.0, 0.2], "comm-mb-total": [0.0, 1.5]}),
+        # the last round has no client-side value (null): the last recorded one is used
+        write_run(tmp_path, "a1", [0.1, 0.7, 0.8], seed=1, columns={"eval_acc_min": [0.1, 0.4, None], "comm-mb-total": [0.0, 2.0, 2.5]}),
+        write_run(tmp_path, "b", [0.1, 0.2], strategy="scaffold"),  # does not record the keys at all
+    ]
+    rows = {r["run"]: r for r in compare.summarise(paths, 0.9, extra=["eval_acc_min", "comm-mb-total"])}
+    assert rows["fedavg synthetic iid"]["eval_acc_min"] == "0.300 ± 0.141"
+    assert rows["fedavg synthetic iid"]["comm-mb-total"] == "2.000 ± 0.707"  # 1.5 and 2.5
+    assert rows["scaffold synthetic iid"]["eval_acc_min"] == "-"
+    compare.main([*paths, "--extra", "comm-mb-total", "--csv", str(tmp_path / "t.csv")])
+    assert "comm-mb-total" in capsys.readouterr().out.splitlines()[0]
+    assert (tmp_path / "t.csv").read_text().splitlines()[0].endswith(",comm-mb-total")
+
+
+def test_compare_can_print_a_markdown_table(tmp_path, capsys):
+    compare = load_script("compare")
+    path = write_run(tmp_path, "a", [0.1, 0.8], columns={"eval_acc_min": [0.0, 0.5]})
+    compare.main([path, "--extra", "eval_acc_min", "--markdown"])
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 3 and all(line.startswith("| ") and line.endswith(" |") for line in lines)
+    assert lines[0].split("|")[1].strip() == "run" and lines[0].split("|")[-2].strip() == "eval_acc_min"
+    assert set(lines[1].replace("|", "").replace(" ", "")) == {"-"}  # separator row
+    assert lines[2].split("|")[1].strip() == "fedavg synthetic iid" and lines[2].split("|")[-2].strip() == "0.500"
 
 
 def test_compare_tells_apart_groups_that_differ_only_in_other_settings(tmp_path):
