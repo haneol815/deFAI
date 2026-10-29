@@ -40,6 +40,8 @@ class DistrictNode:
     def __init__(self, sigungu_id, T):
         self.sigungu_id = int(sigungu_id)
         self.T = np.asarray(T, dtype=np.float64)
+        if self.T.ndim != 1 or self.T.size == 0 or not np.isfinite(self.T).all() or (self.T <= 0).any():
+            raise ValueError("Generation intervals must be a nonempty finite positive 1D array in days")
         self.n = len(self.T)
 
     def stats(self, eta):
@@ -64,6 +66,13 @@ class ProvinceNode:
 def federated_fit(nodes, eta0=None, T_hint_median=5.0):
     """중앙(Tier 0): 라운드마다 각 노드에 η를 배포하고 (ℓ, ∇ℓ) 합산을 받아
     L-BFGS-B로 갱신. 반환: (c, k, σ), 최종 NLL, 라운드 수."""
+    nodes = list(nodes)
+    if not nodes:
+        raise ValueError("At least one nonempty federation node is required")
+    if not np.isfinite(T_hint_median) or T_hint_median <= 0:
+        raise ValueError("T_hint_median must be finite and positive")
+    if eta0 is not None and (np.shape(eta0) != (3,) or not np.isfinite(eta0).all()):
+        raise ValueError("eta0 must have three finite log-parameters")
     if eta0 is None:
         eta0 = np.log([1.5, 1.5, T_hint_median])
     rounds = {'count': 0}
@@ -98,9 +107,17 @@ def pooled_reference(T_all):
 
 
 # ── 데이터 로더 ─────────────────────────────────────────────────────
-def load_district_pairs(csv_path, min_n=1):
+def load_district_pairs(csv_path, min_n=1, strict=False):
     """패치된 sim_gen_interval.csv → {sigungu_id: T배열(T>0)}."""
     df = pd.read_csv(csv_path, encoding='utf-8-sig')
+    if not {'T_days', 'child_sigungu'} <= set(df.columns):
+        raise ValueError('Interval CSV requires T_days and child_sigungu columns')
+    if strict:
+        values = df[['T_days', 'child_sigungu']].to_numpy(dtype=float)
+        if len(values) == 0 or not np.isfinite(values).all() or (values[:, 0] <= 0).any():
+            raise ValueError('Every interval must be finite and positive; missing rows are not silently omitted')
+        if (values[:, 1] < 0).any() or not np.equal(values[:, 1], np.floor(values[:, 1])).all():
+            raise ValueError('District identifiers must be nonnegative integers')
     df = df.dropna(subset=['T_days'])
     df = df[df['T_days'] > 0]
     out = {}

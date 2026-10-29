@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 import torch
+from runtime import DEVICE, device_name, require_device
 
 from run_algorithm_study import (ROOT, OUTPUT, CONTEXTS, CONFIGS, FAMILIES, cache,
                                  MultiModalNet, seed_all, cpu_state, train_one)
@@ -25,7 +26,7 @@ def main(context_index):
     synthetic_indices = [torch.tensor(np.flatnonzero(synthetic["client"] == c)) for c in range(3)]
     selected = []
     for seed in [17, 29, 43]:
-        seed_all(seed); model = MultiModalNet().cuda(); initial = cpu_state(model)
+        seed_all(seed); model = MultiModalNet().to(DEVICE); initial = cpu_state(model)
         configs = CONFIGS if seed == 17 else selected
         results = [train_one(model, initial, data, tensors, extra, training, synthetic_indices,
                              condition, bias, config, seed, 20) for config in configs]

@@ -11,6 +11,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from runtime import DEVICE, device_name, require_device
 from torch.nn import functional as F
 
 from run_federated_study import (ROOT, MultiModalNet, average_states, seed_all,
@@ -33,29 +34,29 @@ def patient_groups(data):
 
 
 def local_update(model, tensors, indices, extra, extra_indices, ratio, method, seed):
-    generator = torch.Generator(device="cuda").manual_seed(seed)
-    nuisance = torch.Generator(device="cuda").manual_seed(seed+900000)
+    generator = torch.Generator(device=DEVICE).manual_seed(seed)
+    nuisance = torch.Generator(device=DEVICE).manual_seed(seed+900000)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    indices = torch.as_tensor(indices, dtype=torch.long, device="cuda")
+    indices = torch.as_tensor(indices, dtype=torch.long, device=DEVICE)
     model.train()
-    order = indices[torch.randperm(len(indices), generator=generator, device="cuda")]
+    order = indices[torch.randperm(len(indices), generator=generator, device=DEVICE)]
     for selected in order.split(32):
         source = selected
         image = tensors["images"][selected]
         if ratio:
-            choose = torch.randint(len(extra_indices), (len(selected),), generator=generator, device="cuda")
+            choose = torch.randint(len(extra_indices), (len(selected),), generator=generator, device=DEVICE)
             synthetic = extra_indices[choose]
             source = torch.cat([source, extra["source"][synthetic]])
             image = torch.cat([image, extra["images"][synthetic]])
         meta, y, cls, weight = [tensors[k][source] for k in ["meta", "blood", "treatment", "weight"]]
-        if torch.rand((), generator=generator, device="cuda") < .5:
+        if torch.rand((), generator=generator, device=DEVICE) < .5:
             image = image.flip(-1)
         image = suppress_brightness(image, method)
         prediction, logits = model(image, meta)
         loss_each = F.smooth_l1_loss(prediction[:, 0]*30, y, reduction="none") + \
                     .5*F.binary_cross_entropy_with_logits(logits[:, 0], cls, reduction="none")
         if method in ["gain_aug", "gain_consistency"]:
-            gain = .65+.35*torch.rand(len(image), generator=nuisance, device="cuda")
+            gain = .65+.35*torch.rand(len(image), generator=nuisance, device=DEVICE)
             changed_prediction, changed_logits = model(attenuate(image, gain), meta)
             changed_loss = F.smooth_l1_loss(changed_prediction[:, 0]*30, y, reduction="none") + \
                            .5*F.binary_cross_entropy_with_logits(changed_logits[:, 0], cls, reduction="none")
@@ -81,8 +82,7 @@ def inputs(tensors, method, gain=1.):
 
 
 def run():
-    if not torch.cuda.is_available() or "4080" not in torch.cuda.get_device_name(0):
-        raise RuntimeError("RTX4080 required")
+    require_device()
     torch.set_num_threads(4); torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
     OUTPUT.mkdir(exist_ok=True)
@@ -90,7 +90,7 @@ def run():
     groups, cutoffs = patient_groups(data)
     groups.to_csv(OUTPUT / "patient_brightness_groups.csv", index=False)
     protocol = {"stage": "research_only", "intrinsic_skin_labels_available": False,
-                "device": torch.cuda.get_device_name(0), "methods": METHODS,
+                "device": device_name(), "methods": METHODS,
                 "data_conditions": ["real", "paired100"], "seeds": [17, 29, 43], "rounds": 20,
                 "train_gain_range": [.65, 1.], "test_gains": GAINS,
                 "consistency_coefficient_regression": .5, "consistency_coefficient_probability": .5,
@@ -109,10 +109,10 @@ def run():
     extra = extras(data, synthetic)["gan"]
     training = [np.flatnonzero((data["split"] == "train") & (data["client"] == c)) for c in range(3)]
     weights = [len(np.unique(data["patient"][ix])) for ix in training]
-    synthetic_indices = [torch.tensor(np.flatnonzero(synthetic["client"] == c), device="cuda") for c in range(3)]
+    synthetic_indices = [torch.tensor(np.flatnonzero(synthetic["client"] == c), device=DEVICE) for c in range(3)]
     val, test = [np.flatnonzero(data["split"] == s) for s in ["val", "test"]]
     for seed in protocol["seeds"]:
-        seed_all(seed); model = MultiModalNet().cuda()
+        seed_all(seed); model = MultiModalNet().to(DEVICE)
         initial = OrderedDict((k, v.detach().clone()) for k, v in model.state_dict().items())
         for condition in protocol["data_conditions"]:
             ratio = int(condition == "paired100")

@@ -24,6 +24,7 @@ import glob
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import shlex
 import subprocess
@@ -198,7 +199,7 @@ def main(argv=None):
         changed = [path for path, mtime in after.items() if before.get(path) != mtime]  # new, or rewritten
         if changed:
             path = max(changed, key=after.get)
-            manifest[key] = {"history": os.path.relpath(path, output_dir)}
+            manifest[key] = {"history": Path(os.path.relpath(path, output_dir)).as_posix()}
             save_manifest(output_dir, manifest)
             results.append(path)
             done += 1

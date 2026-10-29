@@ -1,3 +1,5 @@
+> Version 0.2 integration: use ../../docs/user_guide_ko.md and the package optional dependencies. This note below records the original 2026-10-29 publication; current modified-source hashes are in defai/research/catalog.json.
+
 # Neonatal jaundice research
 
 Research stage; not deployed.

@@ -1,6 +1,7 @@
 """Model, data loading, and local train/test logic shared by ServerApp and ClientApp."""
 
 from dataclasses import dataclass
+import os
 
 import numpy as np
 import torch
@@ -93,7 +94,12 @@ def build_model(dataset):
 
 
 def get_device():
-    return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = os.environ.get("DEFAI_DEVICE", "cpu")
+    if device not in {"cpu", "cuda"}:
+        raise ValueError("DEFAI_DEVICE must be cpu or cuda")
+    if device == "cuda" and not torch.cuda.is_available():
+        raise ValueError("CUDA requested but unavailable")
+    return torch.device(device)
 
 
 def _make_transform(dataset):

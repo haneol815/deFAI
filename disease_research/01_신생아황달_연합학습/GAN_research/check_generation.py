@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 import torch
+from runtime import DEVICE, device_name, require_device
 from torchvision import models
 
 ROOT = Path(__file__).resolve().parent
@@ -13,9 +14,9 @@ ROOT = Path(__file__).resolve().parent
 def features(model, array):
     output = []
     for offset in range(0, len(array), 128):
-        image = torch.tensor(array[offset:offset+128], dtype=torch.float32, device="cuda").permute(0, 3, 1, 2)/255
-        image = (image-torch.tensor([.485, .456, .406], device="cuda")[None, :, None, None]) / \
-                torch.tensor([.229, .224, .225], device="cuda")[None, :, None, None]
+        image = torch.tensor(array[offset:offset+128], dtype=torch.float32, device=DEVICE).permute(0, 3, 1, 2)/255
+        image = (image-torch.tensor([.485, .456, .406], device=DEVICE)[None, :, None, None]) / \
+                torch.tensor([.229, .224, .225], device=DEVICE)[None, :, None, None]
         with torch.no_grad():
             output.append(model(image).flatten(1).cpu().numpy())
     return np.concatenate(output).astype(np.float64)
@@ -43,7 +44,7 @@ def main():
     old[..., 2] = (200-(100*real["blood"][source]/20).astype(int))[:, None, None]
     old = np.clip(old+rng.integers(-20, 20, old.shape, dtype=np.int16), 0, 255).astype(np.uint8)
     backbone = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-    model = torch.nn.Sequential(*list(backbone.children())[:-1]).cuda().eval()
+    model = torch.nn.Sequential(*list(backbone.children())[:-1]).to(DEVICE).eval()
     fv = features(model, val)
     result = {"stage": "research_only", "reference": "real validation images; test images not used",
               "metric": "unbiased polynomial MMD on ImageNet ResNet18 features, not Inception FID/KID",

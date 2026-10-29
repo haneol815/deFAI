@@ -5,6 +5,8 @@ out-of-range value only fails deep inside a round.
 """
 
 from logging import WARNING
+import math
+from numbers import Real
 
 from flwr.supercore import log
 
@@ -25,6 +27,7 @@ CHOICES = {
 
 # key -> (predicate, description)
 RANGES = {
+    "seed": (lambda v: v >= 0, ">= 0"),
     "num-server-rounds": (lambda v: v >= 1, ">= 1"),
     "fraction-train": (lambda v: 0 <= v <= 1, "in [0, 1]"),
     "fraction-evaluate": (lambda v: 0 <= v <= 1, "in [0, 1]"),
@@ -69,10 +72,19 @@ def validate_config(cfg) -> None:
         if key in cfg and cfg[key] not in allowed:
             errors.append(f"{key}={cfg[key]!r}: expected one of {', '.join(map(str, allowed))}")
     for key, (ok, expected) in RANGES.items():
-        if key in cfg and not ok(cfg[key]):
-            errors.append(f"{key}={cfg[key]!r}: expected {expected}")
+        if key in cfg:
+            value = cfg[key]
+            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value) or not ok(value):
+                errors.append(f"{key}={value!r}: expected a finite number {expected}")
+    for key in ("seed", "num-server-rounds", "local-epochs", "batch-size", "num-byzantine", "multikrum-select", "num-malicious", "personalize-epochs", "compression-bits"):
+        if key in cfg and (isinstance(cfg[key], bool) or not isinstance(cfg[key], int)):
+            errors.append(f"{key} must be an integer")
+    for key in ("save-model", "error-feedback"):
+        if key in cfg and not isinstance(cfg[key], bool):
+            errors.append(f"{key} must be a boolean")
 
-    strategy = STRATEGIES.get(cfg.get("strategy"))
+    name = cfg.get("strategy")
+    strategy = STRATEGIES.get(name) if isinstance(name, str) else None
     if cfg.get("dp", "none") != "none" and strategy is not None and not strategy.supports_dp:
         errors.append(f"dp={cfg['dp']!r} cannot be combined with strategy={cfg['strategy']!r} (needs a mean-based strategy)")
     if errors:

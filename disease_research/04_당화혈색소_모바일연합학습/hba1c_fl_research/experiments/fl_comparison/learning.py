@@ -1,5 +1,6 @@
 """Independent batched local SGD, FedProx, SCAFFOLD option II and local BN."""
 import json
+import os
 import time
 from pathlib import Path
 
@@ -7,12 +8,8 @@ import numpy as np
 import psutil
 import torch
 
-torch.set_num_threads(1)
-DEVICE=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+DEVICE=torch.device(os.environ.get('DEFAI_DEVICE', 'cpu'))
 DTYPE=torch.float32
-if DEVICE.type=='cuda':
-    # This workstation is shared: only transient selected-client tensors use VRAM.
-    torch.cuda.set_per_process_memory_fraction(.02)
 
 
 def initial_parameters(seed,hidden=64,bn=False,device=DEVICE,dtype=DTYPE):
@@ -27,6 +24,14 @@ def initial_parameters(seed,hidden=64,bn=False,device=DEVICE,dtype=DTYPE):
 
 def local_fit(x,y,mask,start,epochs,lr,mu=0.,control=None,bn_state=None,momentum=.1):
     """One parameter copy per client. Sum of individual mean losses, not global mean."""
+    if epochs < 1 or lr <= 0 or not np.isfinite(lr) or mu < 0 or not np.isfinite(mu):
+        raise ValueError('epochs >= 1, finite positive lr and finite nonnegative mu are required')
+    if x.ndim != 3 or y.shape != x.shape[:2] or mask.shape != y.shape or len(x) == 0:
+        raise ValueError('Expected nonempty x[clients,samples,features] and aligned y/mask')
+    if not torch.isfinite(x).all() or not torch.isfinite(y).all() or not torch.isfinite(mask).all():
+        raise ValueError('Training tensors must be finite; zero-fill unavailable targets before masking')
+    if not ((mask == 0) | (mask == 1)).all() or (mask.sum(1) == 0).any():
+        raise ValueError('Each client needs at least one observed sample and a binary mask')
     count=len(x)
     p=[v.detach().clone().requires_grad_(True) for v in start]
     n=mask.sum(1).clamp_min(1)
@@ -211,7 +216,7 @@ def run_training(world,schedule,method,lr,mu,out,seed,round_limit=None):
         'parameters':sum(p.numel() for p in learner.global_p),
         'aggregation':'equal_completed_client',
         'scaffold_control_mean_max_error':max(float((c-ci.mean(0).to(c.device)).abs().max().item()) for c,ci in zip(learner.server_c,learner.client_c)) if method=='scaffold' else None,
-        'device':str(DEVICE),'persistent_client_state_device':'cpu','gpu_memory_fraction_cap':.02,
+        'device':str(DEVICE),'persistent_client_state_device':'cpu','gpu_memory_fraction_cap':None,
         'bn_single_sample_rule':'freeze_running_stats_and_use_prior_stats_when_n_lt_2' if learner.bn else None}
     (out/'validation.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     return learner,result

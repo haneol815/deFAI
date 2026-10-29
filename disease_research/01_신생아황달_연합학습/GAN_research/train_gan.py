@@ -8,6 +8,7 @@ import time
 import numpy as np
 from PIL import Image, ImageDraw
 import torch
+from runtime import DEVICE, device_name, require_device
 from torch.nn import functional as F
 
 from gan_models import Generator, Discriminator, augment
@@ -27,15 +28,14 @@ def image_grid(images, labels, path):
 
 
 def train(steps=3000, seed=91, batch_size=32):
-    if not torch.cuda.is_available() or "4080" not in torch.cuda.get_device_name(0):
-        raise RuntimeError("The requested RTX 4080 is required; no silent CPU fallback")
+    require_device()
     torch.set_num_threads(4)
     torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
     data = np.load(ROOT / "data/real_data.npz")
     output = ROOT / "results/gan"
     output.mkdir(parents=True, exist_ok=True)
-    audit = {"device": torch.cuda.get_device_name(0), "torch": torch.__version__, "steps_per_client": steps,
+    audit = {"device": device_name(), "torch": torch.__version__, "steps_per_client": steps,
              "seed": seed, "batch_size": batch_size, "selection": "fixed final EMA; no test-based selection",
              "clients": []}
     all_images, all_sources, all_clients = [], [], []
@@ -43,33 +43,33 @@ def train(steps=3000, seed=91, batch_size=32):
         start = time.monotonic()
         torch.manual_seed(seed+client); torch.cuda.manual_seed_all(seed+client)
         indices = np.flatnonzero((data["split"] == "train") & (data["client"] == client))
-        x = torch.tensor(data["images"][indices], device="cuda", dtype=torch.float32).permute(0, 3, 1, 2)/127.5-1
+        x = torch.tensor(data["images"][indices], device=DEVICE, dtype=torch.float32).permute(0, 3, 1, 2)/127.5-1
         raw_condition = np.column_stack([data["meta"][indices], data["blood"][indices]/30, data["treatment"][indices]])
-        raw_condition = torch.tensor(raw_condition, dtype=torch.float32, device="cuda")
+        raw_condition = torch.tensor(raw_condition, dtype=torch.float32, device=DEVICE)
         mean, std = raw_condition.mean(0), raw_condition.std(0).clamp_min(.1)
         conditions = (raw_condition-mean)/std
-        generator, discriminator = Generator().cuda(), Discriminator().cuda()
+        generator, discriminator = Generator().to(DEVICE), Discriminator().to(DEVICE)
         ema = deepcopy(generator).eval()
         opt_g = torch.optim.Adam(generator.parameters(), lr=2e-4, betas=(0.0, .9))
         opt_d = torch.optim.Adam(discriminator.parameters(), lr=2e-4, betas=(0.0, .9))
-        fixed = torch.linspace(0, len(indices)-1, 32).long().cuda()
-        fixed_z = torch.randn(32, 96, device="cuda")
+        fixed = torch.linspace(0, len(indices)-1, 32).long().to(DEVICE)
+        fixed_z = torch.randn(32, 96, device=DEVICE)
         history = []
         for step in range(1, steps+1):
-            sample = torch.randint(len(indices), (batch_size,), device="cuda")
+            sample = torch.randint(len(indices), (batch_size,), device=DEVICE)
             c, target = conditions[sample], raw_condition[sample, 4]
             real = x[sample]
             for p in discriminator.parameters():
                 p.requires_grad_(True)
             with torch.no_grad():
-                fake = generator(torch.randn(batch_size, 96, device="cuda"), c)
+                fake = generator(torch.randn(batch_size, 96, device=DEVICE), c)
             real_score, real_aux = discriminator(augment(real), c)
             fake_score, _ = discriminator(augment(fake), c)
             loss_d = F.relu(1-real_score).mean()+F.relu(1+fake_score).mean()+5*F.mse_loss(real_aux, target)
             opt_d.zero_grad(set_to_none=True); loss_d.backward(); opt_d.step()
             for p in discriminator.parameters():
                 p.requires_grad_(False)
-            fake = generator(torch.randn(batch_size, 96, device="cuda"), c)
+            fake = generator(torch.randn(batch_size, 96, device=DEVICE), c)
             fake_score, fake_aux = discriminator(augment(fake), c)
             loss_g = -fake_score.mean()+5*F.mse_loss(fake_aux, target)
             opt_g.zero_grad(set_to_none=True); loss_g.backward(); opt_g.step()
@@ -98,7 +98,7 @@ def train(steps=3000, seed=91, batch_size=32):
         with torch.no_grad():
             for offset in range(0, len(indices), batch_size):
                 cond = conditions[offset:offset+batch_size]
-                im = ema(torch.randn(len(cond), 96, device="cuda"), cond)
+                im = ema(torch.randn(len(cond), 96, device=DEVICE), cond)
                 generated.append(((im.clamp(-1, 1)+1)*127.5).byte().cpu().permute(0, 2, 3, 1).numpy())
         all_images.append(np.concatenate(generated)); all_sources.append(indices)
         all_clients.append(np.full(len(indices), client))

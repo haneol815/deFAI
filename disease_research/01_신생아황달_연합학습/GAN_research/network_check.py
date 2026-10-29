@@ -12,6 +12,7 @@ import time
 import flwr as fl
 import numpy as np
 import torch
+from runtime import DEVICE, device_name, require_device
 
 from run_federated_study import ROOT, MultiModalNet, make_tensors, local_update
 from src.server import NeonatalFedAvg
@@ -22,7 +23,7 @@ class CheckClient(fl.client.NumPyClient):
         self.data = np.load(ROOT / "data/real_data.npz")
         self.tensors = make_tensors(self.data)
         self.indices = np.flatnonzero((self.data["split"] == "train") & (self.data["client"] == client))[:64]
-        self.model = MultiModalNet(pretrained=False).cuda()
+        self.model = MultiModalNet(pretrained=False).to(DEVICE)
         self.client = client
 
     def get_parameters(self, config):
@@ -33,7 +34,7 @@ class CheckClient(fl.client.NumPyClient):
         self.model.load_state_dict(OrderedDict((key, torch.as_tensor(array, dtype=value.dtype))
                                                for (key, value), array in zip(reference.items(), parameters)))
         local_update(self.model, self.tensors, self.indices, None, None, 0, 32, 1, 100+self.client)
-        print(f"RTX4080 client={self.client} training_images={len(self.indices)}", flush=True)
+        print(f"device={device_name()} client={self.client} training_images={len(self.indices)}", flush=True)
         return self.get_parameters({}), len(self.indices), {}
 
 
@@ -96,7 +97,7 @@ def main():
         if "AGGREGATED_ROUND 2 CLIENTS 3" not in text:
             raise AssertionError("Two complete three-client rounds were not observed")
         result = {"clients": 3, "processes": 4, "rounds": 2, "all_exit_codes_zero": True,
-                  "GPU": "RTX4080", "data": "64 training images/client; smoke test, not reported performance"}
+                  "device": device_name(), "data": "64 training images/client; smoke test, not reported performance"}
         (output / "check.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(result)
     finally:

@@ -13,6 +13,7 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from runtime import DEVICE, device_name, require_device
 from torch.nn import functional as F
 
 from run_federated_study import ROOT, MultiModalNet, average_states, seed_all, patients_table, metrics
@@ -46,33 +47,33 @@ def cache(data):
 
 def local_update(model, tensors, indices, extra, extra_indices, ratio, bias, config,
                  anchor, server_control, client_control, seed):
-    generator = torch.Generator(device="cuda").manual_seed(seed)
-    nuisance = torch.Generator(device="cuda").manual_seed(seed+900000)
+    generator = torch.Generator(device=DEVICE).manual_seed(seed)
+    nuisance = torch.Generator(device=DEVICE).manual_seed(seed+900000)
     optimizer = (torch.optim.Adam if config["optimizer"] == "adam" else torch.optim.SGD)(model.parameters(), lr=config["lr"])
     if config["family"] == "scaffold":
-        server_control = {k: v.cuda() for k, v in server_control.items()}
-        client_control = {k: v.cuda() for k, v in client_control.items()}
+        server_control = {k: v.to(DEVICE) for k, v in server_control.items()}
+        client_control = {k: v.to(DEVICE) for k, v in client_control.items()}
     train_mode(model, config["family"] in ["fedbn", "fedavg_trainbn"])
-    order = torch.as_tensor(indices)[torch.randperm(len(indices), generator=generator, device="cuda").cpu()]
+    order = torch.as_tensor(indices)[torch.randperm(len(indices), generator=generator, device=DEVICE).cpu()]
     steps = 0
     # Only FedProx and SCAFFOLD need the round anchor on GPU.
     for selected in order.split(32):
         source = selected
         image = tensors["images"][selected]
         if ratio:
-            choose = torch.randint(len(extra_indices), (len(selected),), generator=generator, device="cuda").cpu()
+            choose = torch.randint(len(extra_indices), (len(selected),), generator=generator, device=DEVICE).cpu()
             synthetic = extra_indices[choose]
             source = torch.cat([source, extra["source"][synthetic]])
             image = torch.cat([image, extra["images"][synthetic]])
-        image = image.cuda()
-        meta, y, cls, weight = [tensors[k][source].cuda() for k in ["meta", "blood", "treatment", "weight"]]
-        if torch.rand((), generator=generator, device="cuda") < .5:
+        image = image.to(DEVICE)
+        meta, y, cls, weight = [tensors[k][source].to(DEVICE) for k in ["meta", "blood", "treatment", "weight"]]
+        if torch.rand((), generator=generator, device=DEVICE) < .5:
             image = image.flip(-1)
         prediction, logits = model(image, meta)
         loss_each = F.smooth_l1_loss(prediction[:, 0]*30, y, reduction="none") + \
                     .5*F.binary_cross_entropy_with_logits(logits[:, 0], cls, reduction="none")
         if bias:
-            gain = .65+.35*torch.rand(len(image), generator=nuisance, device="cuda")
+            gain = .65+.35*torch.rand(len(image), generator=nuisance, device=DEVICE)
             changed, changed_logits = model(attenuate(image, gain), meta)
             changed_loss = F.smooth_l1_loss(changed[:, 0]*30, y, reduction="none") + \
                            .5*F.binary_cross_entropy_with_logits(changed_logits[:, 0], cls, reduction="none")
@@ -98,10 +99,10 @@ def local_update(model, tensors, indices, extra, extra_indices, ratio, bias, con
 def evaluate(model, data, tensors, indices, gain=1.):
     model.eval(); predictions, probabilities = [], []
     for selected in np.array_split(indices, max(1, int(np.ceil(len(indices)/64)))):
-        image = tensors["images"][selected].cuda()
+        image = tensors["images"][selected].to(DEVICE)
         if gain != 1.:
             image = attenuate(image, gain)
-        regression, logits = model(image, tensors["meta"][selected].cuda())
+        regression, logits = model(image, tensors["meta"][selected].to(DEVICE))
         predictions.extend((regression[:, 0]*30).cpu().tolist())
         probabilities.extend(logits[:, 0].sigmoid().cpu().tolist())
     return patients_table(data, indices, predictions, probabilities)
@@ -135,7 +136,7 @@ def train_one(model, initial, data, tensors, extra, training, synthetic_indices,
     max_control_error = 0.
     for round_id in range(1, rounds+1):
         states = []
-        anchor = OrderedDict((key, value.cuda()) for key, value in state.items() if key in dict(model.named_parameters())) if config["family"] in ["fedprox", "scaffold"] else None
+        anchor = OrderedDict((key, value.to(DEVICE)) for key, value in state.items() if key in dict(model.named_parameters())) if config["family"] in ["fedprox", "scaffold"] else None
         old_server = server_control
         for client in range(3):
             model.load_state_dict(personalized_state(state, local_bn[client]) if config["family"] == "fedbn" else state)
@@ -183,13 +184,12 @@ def train_one(model, initial, data, tensors, extra, training, synthetic_indices,
 def run(rounds=20, plan_only=False):
     torch.set_num_threads(4); torch.backends.cudnn.benchmark = False
     torch.set_float32_matmul_precision("high")
-    if not torch.cuda.is_available() or "4080" not in torch.cuda.get_device_name(0):
-        raise RuntimeError("RTX4080 required")
+    require_device()
     OUTPUT.mkdir(exist_ok=True)
     data = np.load(ROOT / "data/real_data.npz")
     training = [np.flatnonzero((data["split"] == "train") & (data["client"] == c)) for c in range(3)]
     patient_weights = [len(np.unique(data["patient"][ix])) for ix in training]
-    protocol = {"stage": "research_only", "device": torch.cuda.get_device_name(0), "rounds": rounds,
+    protocol = {"stage": "research_only", "device": device_name(), "rounds": rounds,
                 "seeds": [17, 29, 43], "contexts": CONTEXTS, "configurations": CONFIGS,
                 "tuning": "seed17 best patient validation MAE per family/context; freeze configuration before training seeds29/43; test only after all training",
                 "checkpoint": "minimum patient validation MAE separately per seed, fixed 20 rounds",
@@ -219,7 +219,7 @@ def run(rounds=20, plan_only=False):
     synthetic_indices = [torch.tensor(np.flatnonzero(synthetic["client"] == c)) for c in range(3)]
     results = []; selection = []
     for seed in [17, 29, 43]:
-        seed_all(seed); model = MultiModalNet().cuda(); initial = cpu_state(model)
+        seed_all(seed); model = MultiModalNet().to(DEVICE); initial = cpu_state(model)
         for condition, bias in CONTEXTS:
             configs = CONFIGS if seed == 17 else list({s["config"]["id"]: s["config"] for s in selection if s["condition"] == condition and s["bias"] == bias}.values())
             for config in configs:
@@ -260,7 +260,7 @@ def run(rounds=20, plan_only=False):
     # Only now unlock test inference; tuning code never inspects its outcomes.
     groups, _ = patient_groups(data)
     test = np.flatnonzero(data["split"] == "test")
-    model = MultiModalNet(pretrained=False).cuda()
+    model = MultiModalNet(pretrained=False).to(DEVICE)
     for s in selection:
         for seed in [17, 29, 43]:
             name = f"{s['condition']}_bias{int(s['bias'])}_{s['config']['id']}_seed{seed}"

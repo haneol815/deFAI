@@ -48,15 +48,26 @@ def _like(result: np.ndarray, reference: np.ndarray) -> np.ndarray:
 def weighted_mean(updates: Sequence[Arrays], weights: Sequence[float]) -> Arrays:
     """sum_i (w_i / sum_j w_j) * update_i"""
     w = np.asarray(weights, dtype=np.float64)
-    if len(w) != len(updates):
+    if not len(updates) or w.ndim != 1 or len(w) != len(updates):
         raise ValueError("one weight per update is required")
-    if not np.all(w >= 0) or w.sum() <= 0:
+    if not np.isfinite(w).all() or not np.all(w >= 0) or not np.isfinite(w.sum()) or w.sum() <= 0:
         raise ValueError("weights must be non-negative with a positive sum")
     w = w / w.sum()
-    return {
-        k: _like(np.tensordot(w, _stack(updates, k), axes=1), updates[0][k])
-        for k in updates[0]
-    }
+    keys = set(updates[0])
+    if not keys or any(set(update) != keys for update in updates):
+        raise ValueError("updates must have the same nonempty parameter keys")
+    result = {}
+    for key, reference in updates[0].items():
+        total = np.zeros(reference.shape, dtype=np.float64)
+        scratch = np.empty_like(total)
+        for weight, update in zip(w, updates):
+            value = np.asarray(update[key])
+            if value.shape != reference.shape or not np.isfinite(value).all():
+                raise ValueError("client arrays must be finite and have matching shapes")
+            np.multiply(value, weight, out=scratch, dtype=np.float64)
+            total += scratch
+        result[key] = _like(total, reference)
+    return result
 
 
 def coordinate_median(updates: Sequence[Arrays]) -> Arrays:

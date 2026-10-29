@@ -15,6 +15,8 @@ import os
 import statistics
 import sys
 
+import matplotlib
+matplotlib.use("Agg")  # File output works without a desktop/Tk installation.
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -69,8 +71,12 @@ def main(argv=None):
     plt.grid(alpha=0.3)
     plt.legend(fontsize=8)
     plt.tight_layout()
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     plt.savefig(args.out, dpi=150)
+    figure = plt.gcf()
+    plt.close(figure)
     print(f"saved: {args.out}")
+    return figure
 
 
 if __name__ == "__main__":

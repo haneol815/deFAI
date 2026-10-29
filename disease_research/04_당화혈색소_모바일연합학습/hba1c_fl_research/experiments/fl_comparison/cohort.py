@@ -23,8 +23,10 @@ def sha256(path):
     return h.hexdigest()
 
 
-def calibrate(out):
-    cycle = DATA / 'NHANES_2017-2018'
+def calibrate(out, data_dir=None):
+    out = Path(out)
+    data_root = DATA if data_dir is None else Path(data_dir)
+    cycle = data_root / 'NHANES_2017-2018'
     files = [cycle / f'{name}_J.xpt' for name in ('DEMO','GHB','GLU','BMX','FASTQX')]
     frames = [pd.read_sas(path, format='xport') for path in files]
     keep = [['SEQN','RIDAGEYR','RIAGENDR'], ['SEQN','LBXGH'],
@@ -43,7 +45,7 @@ def calibrate(out):
     weighted_x = fitx * np.sqrt(dev.WTSAF2YR.to_numpy())[:, None]
     weighted_y = dev.LBXGH.to_numpy() * np.sqrt(dev.WTSAF2YR.to_numpy())
     coef = np.linalg.lstsq(weighted_x, weighted_y, rcond=None)[0]
-    hall = DATA / 'Hall2018_glucotypes' / 'S5_Data_clinical.sqlite'
+    hall = data_root / 'Hall2018_glucotypes' / 'S5_Data_clinical.sqlite'
     with sqlite3.connect(hall) as con:
         hs = pd.read_sql_query('select userID,FBG,mean_glucose,sd_glucose from clinical', con).dropna()
     rng = np.random.default_rng(32026)
@@ -66,7 +68,7 @@ def calibrate(out):
             'Hall bridge is a short-record cross-sectional assumption, not a validated timing model.',
             'Daily CGM moments only; no full 5-minute waveform or activity data generated.',
             'Long-term dynamics, participation and sensor bias are scenario assumptions.'],
-        'source_hashes':{str(p.relative_to(ROOT)):sha256(p) for p in files+[hall]},
+        'source_hashes':{str(Path('data/public') / p.relative_to(data_root)):sha256(p) for p in files+[hall]},
         'y_mean':ymean,'x_mean':xmean.tolist(),'x_scale':xscale.tolist(),
     }
     out.mkdir(parents=True,exist_ok=True)

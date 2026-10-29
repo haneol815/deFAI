@@ -14,15 +14,16 @@ SOURCE = ROOT.parent / "NeoJaundice" / "data"
 CROP = (.37, .39, .63, .65)  # Central skin patch; fixed before looking at test performance.
 
 
-def prepare(output, seed=42):
+def prepare(output, seed=42, source=SOURCE):
+    source = Path(source)
     if (output / "real_data.npz").exists() or (output / "audit.json").exists():
         raise FileExistsError("A completed preparation already exists; use a new output directory")
     output.mkdir(parents=True, exist_ok=True)
-    frame = pd.read_csv(SOURCE / "metadata.csv", dtype={"patient_id": str})
+    frame = pd.read_csv(source / "metadata.csv", dtype={"patient_id": str})
     if frame.groupby("patient_id")[["blood(mg/dL)", "Treatment"]].nunique().to_numpy().max() != 1:
         raise ValueError("Conflicting outcomes within a patient")
     original_rows = len(frame)
-    source_hashes = {name: sha256((SOURCE/"images"/name).read_bytes()).hexdigest() for name in frame.image_idx}
+    source_hashes = {name: sha256((source/"images"/name).read_bytes()).hexdigest() for name in frame.image_idx}
     frame["sha256"] = frame.image_idx.map(source_hashes)
     cross_patient_hashes = frame.groupby("sha256").patient_id.nunique()
     cross_patient_hashes = set(cross_patient_hashes.index[cross_patient_hashes > 1])
@@ -72,7 +73,7 @@ def prepare(output, seed=42):
     hashes, seen, images = {}, {}, []
     duplicates_within_patient = 0
     for row in frame.itertuples():
-        path = SOURCE / "images" / row.image_idx
+        path = source / "images" / row.image_idx
         digest = source_hashes[row.image_idx]
         if digest in seen:
             if seen[digest] != row.patient_id:
@@ -92,7 +93,7 @@ def prepare(output, seed=42):
              patient=frame.patient_id.to_numpy(dtype=str), split=frame.split.to_numpy(dtype=str),
              client=frame.client.to_numpy(dtype="int64"))
     frame.to_csv(output / "split_manifest.csv", index=False)
-    audit = {"source": str(SOURCE), "metadata_sha256": sha256((SOURCE/"metadata.csv").read_bytes()).hexdigest(),
+    audit = {"source": str(source), "metadata_sha256": sha256((source/"metadata.csv").read_bytes()).hexdigest(),
              "source_rows": original_rows, "retained_rows": len(frame), "retained_patients": frame.patient_id.nunique(),
              "quarantined_patients": excluded.patient_id.unique().tolist(),
              "zero_target_reason": "Unverified zero-valued outcome; excluded from primary analysis, not clinically adjudicated",
@@ -122,5 +123,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "data")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--source", type=Path, default=SOURCE)
     args = parser.parse_args()
-    prepare(args.output, args.seed)
+    prepare(args.output, args.seed, args.source)

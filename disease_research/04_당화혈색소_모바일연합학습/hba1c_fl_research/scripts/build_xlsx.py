@@ -1,5 +1,8 @@
+from pathlib import Path
+RESEARCH_ROOT = Path(__file__).resolve().parents[1]
+(RESEARCH_ROOT / "report").mkdir(exist_ok=True)
 # -*- coding: utf-8 -*-
-import sys; sys.path.insert(0,'/workspace/hba1c_fl_research/scripts')
+import sys; sys.path.insert(0,str(RESEARCH_ROOT / 'scripts'))
 import pandas as pd
 from candidates import C
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -61,15 +64,15 @@ tim=pd.DataFrame([
 ('medication_episode','에피소드','start/end → participant_pid','예측창과 겹침 표시'),
 ('feature_window (파생)','HbA1c 1건당 1행','lab_test_id','입력 관측기간 W, 예측간격 g, 생성 규칙 버전'),
 ],columns=['테이블','카디널리티','키/연결','시간 규칙'])
-with pd.ExcelWriter('/workspace/hba1c_fl_research/report/후보_데이터셋_전체목록.xlsx',engine='openpyxl') as w:
+with pd.ExcelWriter(str(RESEARCH_ROOT / 'report/후보_데이터셋_전체목록.xlsx'),engine='openpyxl') as w:
     df.to_excel(w,sheet_name='후보 전체',index=False)
     pd.DataFrame({'분류':['①','②','③','④'],'정의':['실제 HbA1c와 혈당·체중이 동일인에 연결','실제 HbA1c + 일부 입력(혈당 또는 체중 또는 CGM만)','HbA1c 없음 — 보조용(정답 사용 금지)','합성·출처불명·검증불가 — 정답 사용 금지']}).to_excel(w,sheet_name='분류 정의',index=False)
     pd.DataFrame({'확인수준':['원자료확인','공식변수사전확인','문헌확인','미확인'],'의미':['이번에 원자료를 받아 직접 집계','공식 코드북/사전에서 변수 확인(원자료 미확보)','원논문·공식 안내문 서술로 확인','이번 조사에서 근거 미확보']}).to_excel(w,sheet_name='확인수준 정의',index=False)
-with pd.ExcelWriter('/workspace/hba1c_fl_research/report/변수사전.xlsx',engine='openpyxl') as w:
+with pd.ExcelWriter(str(RESEARCH_ROOT / 'report/변수사전.xlsx'),engine='openpyxl') as w:
     vd.to_excel(w,sheet_name='변수사전',index=False)
     tim.to_excel(w,sheet_name='시간연결구조',index=False)
     pd.DataFrame([('HbA1c %→mmol/mol','IFCC = 10.93 × NGSP − 23.50','NGSP/IFCC 마스터방정식 (ngsp.org/ifcc.asp)'),('HbA1c mmol/mol→%','NGSP = 0.09148 × IFCC + 2.152','동일'),('혈당 mmol/L→mg/dL','mg/dL = mmol/L × 18.016','포도당 분자량 180.16 g/mol; NHANES는 mg/dL×0.05551'),('GMI(파생, 정답 아님)','GMI% = 3.31 + 0.02392 × 평균 CGM 혈당(mg/dL)','Bergenstal et al. Diabetes Care 2018'),('eAG(파생, 정답 아님)','eAG(mg/dL) = 28.7 × HbA1c% − 46.7','ADAG (Nathan 2008)'),('체중 lb→kg','kg = lb × 0.45359237','국제 정의')],columns=['변환','공식','근거']).to_excel(w,sheet_name='단위변환',index=False)
-for p in ['/workspace/hba1c_fl_research/report/후보_데이터셋_전체목록.xlsx','/workspace/hba1c_fl_research/report/변수사전.xlsx']:
+for p in [str(RESEARCH_ROOT / 'report/후보_데이터셋_전체목록.xlsx'),str(RESEARCH_ROOT / 'report/변수사전.xlsx')]:
     from openpyxl import load_workbook
     wb=load_workbook(p)
     for ws in wb.worksheets:
@@ -79,5 +82,5 @@ for p in ['/workspace/hba1c_fl_research/report/후보_데이터셋_전체목록.
             for c in col: c.alignment=Alignment(wrap_text=True,vertical='top')
         ws.freeze_panes='C2' if ws.title=='후보 전체' else 'A2'
     wb.save(p)
-df.to_csv('/workspace/hba1c_fl_research/report/후보_데이터셋_전체목록.csv',index=False,encoding='utf-8-sig')
+df.to_csv(str(RESEARCH_ROOT / 'report/후보_데이터셋_전체목록.csv'),index=False,encoding='utf-8-sig')
 print(len(df),'candidates;',len(vd),'variables')

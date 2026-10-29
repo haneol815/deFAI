@@ -1,7 +1,10 @@
+from pathlib import Path
+RESEARCH_ROOT = Path(__file__).resolve().parents[1]
+(RESEARCH_ROOT / "report").mkdir(exist_ok=True)
 import pandas as pd, numpy as np, json
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import KFold
-base='/workspace/hba1c_fl_research/data/public'
+base=str(RESEARCH_ROOT / 'data/public')
 out={}
 rows=[]
 for cyc,s in [('NHANES_2021-2023','L'),('NHANES_2017-2018','J')]:
@@ -65,6 +68,6 @@ for cyc,s in [('NHANES_2021-2023','L'),('NHANES_2017-2018','J')]:
         'RMSE_mean_pred_%p':round(np.mean(rm_m),3),'RMSE_linear_%p':round(np.mean(rm_l),3),
         'note':'Within-NHANES random person split; not clinical validation; survey weights not applied'}
     out[cyc]=res
-json.dump(out,open('/workspace/hba1c_fl_research/report/NHANES_linkage_summary.json','w'),indent=1,default=float,ensure_ascii=False)
-pd.DataFrame(rows).to_csv('/workspace/hba1c_fl_research/report/NHANES_group_distribution.csv',index=False)
+json.dump(out,open(str(RESEARCH_ROOT / 'report/NHANES_linkage_summary.json'),'w'),indent=1,default=float,ensure_ascii=False)
+pd.DataFrame(rows).to_csv(str(RESEARCH_ROOT / 'report/NHANES_group_distribution.csv'),index=False)
 print(json.dumps(out,indent=1,default=float))

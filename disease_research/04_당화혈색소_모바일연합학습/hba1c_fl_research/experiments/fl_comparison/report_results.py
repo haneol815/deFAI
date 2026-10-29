@@ -25,11 +25,31 @@ NAMES={'fedavg':'FedAvg','fedprox':'FedProx','scaffold':'SCAFFOLD',
        'fedavg_bn':'FedAvg + BN','fedbn':'FedBN'}
 COLORS={'fedavg':'#718391','fedprox':'#087f81','scaffold':'#326bb6',
         'fedavg_bn':'#a56a24','fedbn':'#7954a1'}
-font_manager.fontManager.addfont('C:/Windows/Fonts/malgun.ttf')
-plt.rcParams.update({'font.family':'Malgun Gothic','font.size':12,
+available_fonts = {font.name for font in font_manager.fontManager.ttflist}
+report_font = next((name for name in ('Malgun Gothic', 'AppleGothic', 'Noto Sans CJK KR') if name in available_fonts), 'DejaVu Sans')
+plt.rcParams.update({'font.family':report_font,'font.size':12,
     'axes.unicode_minus':False,'svg.fonttype':'none','svg.hashsalt':'hba1c-fl-20261017','axes.spines.top':False,
     'axes.spines.right':False,'axes.labelcolor':'#172839',
     'text.color':'#172839','xtick.color':'#536779','ytick.color':'#172839'})
+
+
+def report_base(html_path, backup_path):
+    """Preserve a supplied design, or create an independent repeatable report base."""
+    html_path, backup_path = Path(html_path), Path(backup_path)
+    if not backup_path.exists():
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        if html_path.exists():
+            shutil.copy2(html_path, backup_path)
+        else:
+            backup_path.write_text('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                '<title>당화혈색소 연합학습 연구 결과</title><style>'
+                'body{font:16px/1.7 sans-serif;margin:0;color:#172839}main{max-width:1100px;margin:auto;padding:24px}'
+                'table{border-collapse:collapse;width:100%}td,th{padding:8px;border:1px solid #ccd4dc}'
+                'svg,img{max-width:100%;height:auto}.svg-scroll{overflow:auto}</style></head>'
+                '<body><main><p>연구 단계·실전 미적용. 과거 설계 문서 없이 실험 산출물에서 생성한 독립 보고서입니다.</p>'
+                '</main></body></html>', encoding='utf-8')
+    return backup_path.read_text(encoding='utf-8')
 
 
 class Baseline:
@@ -304,9 +324,8 @@ python experiments/fl_comparison/report_results.py</pre><p class="small">주 실
 </section>
 '''
     backup=REPORT/'HbA1c_FL_20만명_세부계산설계_기법비교추가전_20261017.html'
-    if not backup.exists():shutil.copy2(HTML,backup)
     # Rebuild from the preserved design, so updating results never duplicates sections.
-    source=backup.read_text(encoding='utf-8')
+    source=report_base(HTML, backup)
     source=source.replace('<main>','<main>'+section,1)
     source=source.replace('<b>계산 설계 안내</b>','<b>계산 설계 안내</b><a href="#optimization-results">추가 · 실제 기법 비교 결과</a>',1)
     source=source.replace('계산 설계 v1.0 · 연구 단계 / 실전 미적용',f'계산 설계 v1.1 · {stamp} 기법 비교 추가 · 연구 단계 / 실전 미적용',1)
@@ -335,9 +354,11 @@ python experiments/fl_comparison/report_results.py</pre><p class="small">주 실
     source=source.replace('JSON은 문서의 기본 설정·근거 상태를 기계가 읽도록 정리한 설계 파일이다.',
         '이 JSON은 원래 전체 설계의 기본 설정이다. 이번 E1 실험에서 선택한 학습률·기법은 첫 추가 절의 최적화 설정 JSON에 별도로 보관했다.')
     HTML.write_text(source,encoding='utf-8')
-    files=list(Path(__file__).parent.glob('*.py'))+[HTML,metric_path,Path(__file__).parent/'unit_checks.json']+list(OUT.glob('*.json'))+list((REPORT/'figures').glob('fl_comparison_*'))
+    checks=Path(__file__).parent/'unit_checks.json'
+    files=list(Path(__file__).parent.glob('*.py'))+[HTML,metric_path]+([checks] if checks.is_file() else [])+list(OUT.glob('*.json'))+list((REPORT/'figures').glob('fl_comparison_*'))
     hashes={str(p.relative_to(ROOT)):sha256(p) for p in files if p.name!='artifact_checksums.json'}
-    (OUT/'artifact_checksums.json').write_text(json.dumps({'built_at_kst':stamp,'sha256':hashes},ensure_ascii=False,indent=2),encoding='utf-8')
+    (OUT/'artifact_checksums.json').write_text(json.dumps({'built_at_kst':stamp,'sha256':hashes,
+        'missing_optional_artifacts':[] if checks.is_file() else ['unit_checks.json']},ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps(summary,ensure_ascii=False,indent=2))
 
 

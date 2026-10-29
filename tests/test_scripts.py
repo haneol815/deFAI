@@ -141,8 +141,8 @@ def test_plot_group_draws_the_mean_with_a_one_std_band_per_configuration(tmp_pat
         write_run(tmp_path, "b", [0.1, 0.2, 0.3], strategy="scaffold"),
     ]
     out = tmp_path / "g.png"
-    plot.main([*paths, "--group", "--title", "two seeds", "-o", str(out)])
-    ax = plt.gca()
+    figure = plot.main([*paths, "--group", "--title", "two seeds", "-o", str(out)])
+    ax = figure.axes[0]
     lines = ax.get_lines()
     assert [line.get_label() for line in lines] == ["fedavg synthetic iid (n=2)", "scaffold synthetic iid (n=1)"]
     assert list(lines[0].get_ydata()) == pytest.approx([0.2, 0.6, 0.7]) and list(lines[0].get_xdata()) == [0, 1, 2]
@@ -164,8 +164,8 @@ def test_plot_group_skips_rounds_without_a_value_for_the_metric(tmp_path):
     plt.close("all")
     paths = [write_run(tmp_path, "a0", [0.1, 0.5, 0.9], seed=0, columns={"dp-epsilon": [None, 1.0, 3.0]}),
              write_run(tmp_path, "a1", [0.1, 0.5, 0.9], seed=1, columns={"dp-epsilon": [None, 3.0, None]})]
-    plot.main([*paths, "--group", "-m", "dp-epsilon", "-o", str(tmp_path / "e.png")])
-    line = plt.gca().get_lines()[0]
+    figure = plot.main([*paths, "--group", "-m", "dp-epsilon", "-o", str(tmp_path / "e.png")])
+    line = figure.axes[0].get_lines()[0]
     assert list(line.get_xdata()) == [1, 2] and list(line.get_ydata()) == pytest.approx([2.0, 3.0])
     plt.close("all")
 
@@ -371,7 +371,7 @@ def test_run_grid_records_the_newest_results_when_several_appear(tmp_path, monke
         for name, mtime in (("mine", 20), ("other", 10), ("later", 30)):
             (tmp_path / name).mkdir()
             (tmp_path / name / "history.json").write_text(json.dumps({"config": cfg, "history": [{"round": 1, "test_acc": 0.5}]}))
-            os.utime(tmp_path / name / "history.json", ns=(mtime, mtime))
+            os.utime(tmp_path / name / "history.json", ns=(mtime * 10**9, mtime * 10**9))
 
     monkeypatch.setattr(grid.subprocess, "run", run)
     assert grid.main(["--output-dir", str(tmp_path), "--seeds", "1"]) == 0
@@ -459,7 +459,8 @@ def test_run_grid_counts_a_rewritten_history_as_success(tmp_path, monkeypatch, c
 
     def run(command, stdout, **kwargs):
         path.write_text(json.dumps({"config": cfg, "history": [{"round": 1, "test_acc": 0.5}]}))
-        os.utime(path, ns=(1 + len(calls), 1 + len(calls)))  # a different mtime each time, whatever the clock resolution
+        stamp = (1 + len(calls)) * 10**9  # NTFS timestamps have 100 ns precision.
+        os.utime(path, ns=(stamp, stamp))
         calls.append(command)
 
     calls = []

@@ -16,6 +16,7 @@ import pandas as pd
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, f1_score,
                              roc_auc_score, mean_absolute_error, mean_squared_error)
 import torch
+from runtime import DEVICE, device_name, require_device
 from torch.nn import functional as F
 
 ROOT = Path(__file__).resolve().parent
@@ -60,18 +61,18 @@ def evaluate(model, data, tensors, indices):
 
 
 def local_update(model, tensors, indices, extra, extra_indices, ratio, batch_size, epochs, seed):
-    generator = torch.Generator(device="cuda").manual_seed(seed)
+    generator = torch.Generator(device=DEVICE).manual_seed(seed)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    indices = torch.as_tensor(indices, dtype=torch.long, device="cuda")
+    indices = torch.as_tensor(indices, dtype=torch.long, device=DEVICE)
     model.train()
     for _ in range(epochs):
-        order = indices[torch.randperm(len(indices), generator=generator, device="cuda")]
+        order = indices[torch.randperm(len(indices), generator=generator, device=DEVICE)]
         for selected in order.split(batch_size):
             image, meta = tensors["images"][selected], tensors["meta"][selected]
             y, cls, weight = tensors["blood"][selected], tensors["treatment"][selected], tensors["weight"][selected]
             if ratio:
                 count = max(1, int(round(len(selected)*ratio)))
-                choose = torch.randint(len(extra_indices), (count,), generator=generator, device="cuda")
+                choose = torch.randint(len(extra_indices), (count,), generator=generator, device=DEVICE)
                 synthetic = extra_indices[choose]
                 source = extra["source"][synthetic]
                 image = torch.cat([image, extra["images"][synthetic]])
@@ -80,7 +81,7 @@ def local_update(model, tensors, indices, extra, extra_indices, ratio, batch_siz
                 cls = torch.cat([cls, tensors["treatment"][source]])
                 weight = torch.cat([weight, tensors["weight"][source]])
             # Geometry only: diagnostic colors are not randomly shifted.
-            if torch.rand((), generator=generator, device="cuda") < .5:
+            if torch.rand((), generator=generator, device=DEVICE) < .5:
                 image = image.flip(-1)
             prediction, logits = model(image, meta)
             loss_each = F.smooth_l1_loss(prediction[:, 0]*30, y, reduction="none") + \
@@ -95,15 +96,15 @@ def local_update(model, tensors, indices, extra, extra_indices, ratio, batch_siz
 
 
 def make_tensors(data):
-    images = torch.as_tensor(data["images"], dtype=torch.float32, device="cuda").permute(0, 3, 1, 2)/255
-    mean = torch.tensor([.485, .456, .406], device="cuda")[None, :, None, None]
-    std = torch.tensor([.229, .224, .225], device="cuda")[None, :, None, None]
+    images = torch.as_tensor(data["images"], dtype=torch.float32, device=DEVICE).permute(0, 3, 1, 2)/255
+    mean = torch.tensor([.485, .456, .406], device=DEVICE)[None, :, None, None]
+    std = torch.tensor([.229, .224, .225], device=DEVICE)[None, :, None, None]
     views = pd.Series(data["patient"]).value_counts()
     return {"images": (images-mean)/std,
-            "meta": torch.as_tensor(data["meta"], device="cuda"),
-            "blood": torch.as_tensor(data["blood"], device="cuda"),
-            "treatment": torch.as_tensor(data["treatment"], device="cuda"),
-            "weight": torch.tensor([1/views[p] for p in data["patient"]], dtype=torch.float32, device="cuda")}
+            "meta": torch.as_tensor(data["meta"], device=DEVICE),
+            "blood": torch.as_tensor(data["blood"], device=DEVICE),
+            "treatment": torch.as_tensor(data["treatment"], device=DEVICE),
+            "weight": torch.tensor([1/views[p] for p in data["patient"]], dtype=torch.float32, device=DEVICE)}
 
 
 def extras(data, synthetic):
@@ -119,16 +120,15 @@ def extras(data, synthetic):
     old = np.clip(old+rng.integers(-20, 20, old.shape, dtype=np.int16), 0, 255).astype(np.uint8)
     result = {}
     for name, array in [("gan", synthetic["images"]), ("procedural", old)]:
-        image = torch.tensor(array, dtype=torch.float32, device="cuda").permute(0, 3, 1, 2)/255
-        mean = torch.tensor([.485, .456, .406], device="cuda")[None, :, None, None]
-        std = torch.tensor([.229, .224, .225], device="cuda")[None, :, None, None]
-        result[name] = {"images": (image-mean)/std, "source": torch.tensor(source, device="cuda")}
+        image = torch.tensor(array, dtype=torch.float32, device=DEVICE).permute(0, 3, 1, 2)/255
+        mean = torch.tensor([.485, .456, .406], device=DEVICE)[None, :, None, None]
+        std = torch.tensor([.229, .224, .225], device=DEVICE)[None, :, None, None]
+        result[name] = {"images": (image-mean)/std, "source": torch.tensor(source, device=DEVICE)}
     return result
 
 
 def run(rounds=20, local_epochs=1, seeds=(17, 29, 43), batch_size=32, paired=False, procedural_half=False):
-    if not torch.cuda.is_available() or "4080" not in torch.cuda.get_device_name(0):
-        raise RuntimeError("RTX 4080 required")
+    require_device()
     torch.set_num_threads(4); torch.backends.cudnn.benchmark = True
     torch.set_float32_matmul_precision("high")
     data = np.load(ROOT / "data/real_data.npz")
@@ -137,15 +137,15 @@ def run(rounds=20, local_epochs=1, seeds=(17, 29, 43), batch_size=32, paired=Fal
     training = [np.flatnonzero((data["split"] == "train") & (data["client"] == client)) for client in range(3)]
     val = np.flatnonzero(data["split"] == "val"); test = np.flatnonzero(data["split"] == "test")
     weights = [len(np.unique(data["patient"][indices])) for indices in training]
-    synthetic_indices = [torch.tensor(np.flatnonzero(synthetic["client"] == client), device="cuda") for client in range(3)]
+    synthetic_indices = [torch.tensor(np.flatnonzero(synthetic["client"] == client), device=DEVICE) for client in range(3)]
     output = ROOT / "results" / ("procedural_half_prediction" if procedural_half else "paired_prediction" if paired else "prediction")
     output.mkdir(parents=True, exist_ok=True)
-    study = {"stage": "research_only", "device": torch.cuda.get_device_name(0), "rounds": rounds,
+    study = {"stage": "research_only", "device": device_name(), "rounds": rounds,
              "local_epochs": local_epochs, "seeds": list(seeds), "batch_size": batch_size,
              "primary_metric": "patient-level MAE in mg/dL on untouched real test patients",
              "model": "ImageNet ResNet18 + 4 metadata features; frozen common CNN BatchNorm; metadata LayerNorm",
              "loss": "SmoothL1(mg/dL) + 0.5 * BCEWithLogits", "client_weights_real_patients": weights,
-             "protocol": "single RTX4080 sequential client simulation; only model states averaged",
+             "protocol": "single-device sequential client simulation; only model states averaged",
              "checkpoint_selection": "lowest patient validation MAE; test not evaluated during selection",
              "synthetic_source": "local paired residual GAN" if paired else "local noise-conditioned GAN and procedural control",
              "optimizer_budget": "fixed real-data passes and optimizer steps; synthetic samples added within the same updates",
@@ -164,7 +164,7 @@ def run(rounds=20, local_epochs=1, seeds=(17, 29, 43), batch_size=32, paired=Fal
         cases = [("federated_procedural_050", "federated", "procedural", .5)]
     for seed in seeds:
         seed_all(seed)
-        model = MultiModalNet().cuda()
+        model = MultiModalNet().to(DEVICE)
         initial = OrderedDict((k, v.detach().clone()) for k, v in model.state_dict().items())
         for name, regime, generation, ratio in cases:
             start = time.monotonic()

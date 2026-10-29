@@ -1,3 +1,40 @@
+# deFAI 0.2: packaged algorithms and disease research
+
+Common algorithms and all four disease-research source collections are available
+through an installable Python package, a unified CLI, and Python APIs.
+Start with the [Korean user guide](docs/user_guide_ko.md).
+
+```powershell
+python -m pip install ".[all]"
+defai doctor
+defai list
+defai demo --output results/demo01
+defai run --strategy fedprox --rounds 3 --output results/prox01
+defai init studies/session01
+defai research list
+```
+
+The default runtime is CPU. Select `--device cuda` explicitly after installing a
+compatible CUDA PyTorch build. Discovery/workspace creation do not import training
+libraries. Optional install groups are `analysis`, `learning`, `flower`, `research`,
+`mobile`, `simulation`, `plot`, `all`, and `test`. Python 3.11/3.12 is recommended;
+Windows Ray simulations need 3.11/3.12, while the in-process backend also runs on 3.13.
+
+The maintained Android app can be built with `defai android --sdk SDK_PATH --output app.apk`.
+It requires an installed Android SDK/JDK; Python dependencies do not install them.
+The mobile parameter coordinator uses explicit rounds, validated client updates,
+atomic persistence and NumPy, without a TensorFlow dependency.
+
+For a locked source-checkout environment use `uv sync --locked --extra research --extra mobile --extra test`.
+`uv.lock` records the resolved dependency graph; `defai doctor` records the active versions.
+
+Research-stage software: synthetic smoke tests do not establish clinical validity,
+causal policy effects, or distributed network performance. The publication manifests
+from 2026-10-29 are historical snapshots; current resource hashes are in
+`defai/research/catalog.json`. Unreleased research remains outside this package.
+
+## Existing algorithm reference
+
 # deFAI — Federated Learning Assignment
 
 [![tests](https://github.com/haneol815/deFAI/actions/workflows/tests.yml/badge.svg)](https://github.com/haneol815/deFAI/actions/workflows/tests.yml)
@@ -265,7 +302,7 @@ What the guarantee does and does not cover:
 
 ## Tests
 ```bash
-pip install -e ".[test]"
+pip install -e ".[all,test]"
 pytest
 ```
 The suite covers the aggregation rules, the accountant (cross-checked against Google's `dp-accounting` and against the

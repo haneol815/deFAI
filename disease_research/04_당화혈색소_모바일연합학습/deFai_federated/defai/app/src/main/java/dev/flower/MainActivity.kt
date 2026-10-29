@@ -28,14 +28,19 @@ class MainActivity : AppCompatActivity() {
             val hba1c = binding.hba1cInput.text.toString().toDoubleOrNull()
             val bloodSugar = binding.bloodSugarInput.text.toString().toDoubleOrNull()
             val weight = binding.weightInput.text.toString().toDoubleOrNull()
+            val host = binding.serverHostInput.text.toString().trim()
+            val port = binding.serverPortInput.text.toString().toIntOrNull()
 
-            if (hba1c == null || bloodSugar == null || weight == null) {
+            if (hba1c == null || bloodSugar == null || weight == null ||
+                !hba1c.isFinite() || !bloodSugar.isFinite() || !weight.isFinite() ||
+                hba1c <= 0 || bloodSugar <= 0 || weight <= 0 || host.isBlank() ||
+                port == null || port !in 1..65535) {
                 Toast.makeText(this, "모든 값을 올바르게 입력해주세요.", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
             binding.logTextview.text = ""
-            startFederatedLearning(hba1c, bloodSugar, weight)
+            startFederatedLearning(hba1c, bloodSugar, weight, host, port)
         }
 
         // Set up a handler to redirect logs to the TextView
@@ -44,10 +49,12 @@ class MainActivity : AppCompatActivity() {
         rootLogger.addHandler(logHandler)
     }
 
-    private fun startFederatedLearning(hba1c: Double, bloodSugar: Double, weight: Double) {
+    private fun startFederatedLearning(hba1c: Double, bloodSugar: Double, weight: Double, host: String, port: Int) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val client = SimpleSingleLayerClient(
+                    serverHost = host,
+                    serverPort = port,
                     hba1c = hba1c,
                     bloodSugar = bloodSugar,
                     weight = weight

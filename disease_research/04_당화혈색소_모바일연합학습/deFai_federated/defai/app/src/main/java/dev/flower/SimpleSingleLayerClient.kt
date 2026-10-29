@@ -13,7 +13,7 @@ import java.util.logging.Logger
 import kotlin.random.Random
 
 class SimpleSingleLayerClient(
-    private val serverHost: String = "haneol815.iptime.org",
+    private val serverHost: String = "10.0.2.2",
     private val serverPort: Int = 8001,
     private val clientId: String = "single_layer_client_${Random.nextInt(1000, 9999)}",
     private val hba1c: Double,
@@ -56,7 +56,7 @@ class SimpleSingleLayerClient(
             logger.info("\n📊 라운드 $round/$totalRounds 시작")
 
             val (serverParams, serverRound) = getParametersFromServerWithRound()
-            if (serverParams == null) {
+            if (serverParams == null || serverRound == null) {
                 logger.severe("❌ 서버로부터 파라미터를 받지 못했습니다.")
                 break
             }
@@ -68,14 +68,26 @@ class SimpleSingleLayerClient(
             val trainingResult = model.train(epochs = 2)
             logger.info("✅ 로컬 훈련 완료 - 손실: ${trainingResult.loss}")
 
-            val submitResult = submitParametersToServer(trainingResult.parameters)
+            val submitResult = submitParametersToServer(trainingResult.parameters, serverRound)
             if (!submitResult) {
                 logger.severe("❌ 서버로 파라미터 전송 실패")
                 break
             }
 
             logger.info("⏳ 서버 자동 집계 대기...")
-            Thread.sleep(500)
+            var advanced = false
+            for (attempt in 1..100) {
+                val (_, observedRound) = getParametersFromServerWithRound()
+                if (observedRound != null && observedRound > serverRound) {
+                    advanced = true
+                    break
+                }
+                Thread.sleep(200)
+            }
+            if (!advanced) {
+                logger.severe("Round did not complete within the wait limit; check other clients.")
+                break
+            }
             logger.info("✅ 라운드 $round 완료")
             Thread.sleep(1000)
         }
@@ -145,11 +157,12 @@ class SimpleSingleLayerClient(
         }
     }
 
-    private fun submitParametersToServer(parameters: List<ParameterInfo>): Boolean {
+    private fun submitParametersToServer(parameters: List<ParameterInfo>, serverRound: Int?): Boolean {
         try {
             val requestBodyJson = gson.toJson(
                 mapOf(
                     "client_id" to clientId,
+                    "round" to serverRound,
                     "parameters" to parameters.map { param ->
                         mapOf(
                             "layer" to param.layer,

@@ -106,7 +106,8 @@ def test_the_cache_directory_can_be_chosen(monkeypatch, tmp_path):
     monkeypatch.setenv("DEFAI_DATA_DIR", str(tmp_path))
     assert mirror.cache_dir() == str(tmp_path)
     monkeypatch.delenv("DEFAI_DATA_DIR")
-    assert mirror.cache_dir().endswith("/.cache/defai")
+    from pathlib import Path
+    assert Path(mirror.cache_dir()).parts[-2:] == (".cache", "defai")
 
 
 def test_the_pinned_checksums_cover_every_archive_of_every_mirror():
@@ -175,7 +176,11 @@ def test_cached_files_are_readable_by_other_users_and_leave_no_temp_files(tiny_m
     name = mirror.SPLIT_FILES["test"][0]
     mirror.fetch("test-mirror", name, str(tmp_path), server)
     files = list((tmp_path / "test-mirror").iterdir())
-    assert [f.name for f in files] == [name] and stat.S_IMODE(files[0].stat().st_mode) == 0o644
+    assert [f.name for f in files] == [name]
+    import os
+    assert os.access(files[0], os.R_OK)
+    if os.name != "nt":  # Windows mode bits do not describe POSIX group/other permissions.
+        assert stat.S_IMODE(files[0].stat().st_mode) == 0o644
 
 
 def test_an_unusable_cache_directory_costs_a_warning_not_the_data(tiny_mnist, tmp_path):

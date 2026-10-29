@@ -4,23 +4,37 @@ build-backend = "hatchling.build"
 
 [project]
 name = "defai"
-version = "0.1.0"
-description = "Federated learning assignment template built on Flower"
+version = "0.2.0"
+description = "Federated learning algorithms and reproducible disease-research workflows"
+readme = "README.md"
 license = {file = "LICENSE"}
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
-    "flwr[simulation]>=1.40.0",
-    "flwr-datasets[vision]>=0.6.1",
-    "torch>=2.1",
-    "torchvision>=0.16",
+    "numpy>=1.26,<3",
 ]
 
+[project.scripts]
+defai = "defai.cli:main"
+
 [project.optional-dependencies]
-plot = ["matplotlib"]
-test = ["pytest", "pytest-cov", "dp-accounting", "ruff"]  # dp-accounting only cross-checks the RDP accountant
+analysis = ["scipy>=1.14,<2", "pandas>=2.2,<4", "openpyxl>=3.1,<4"]
+learning = ["torch>=2.6,<2.7", "torchvision>=0.21,<0.22", "scikit-learn>=1.5,<2", "pillow>=10,<13", "psutil>=6,<8", "opencv-python-headless>=4.10,<6", "tqdm>=4.66,<5"]
+flower = ["flwr==1.42.0", "flwr-datasets[vision]==0.6.1", "defai[learning]"]
+simulation = ["flwr[simulation]==1.42.0", "defai[flower]"]
+plot = ["matplotlib>=3.9,<4", "python-pptx>=1,<2"]
+research = ["defai[analysis,learning,flower,plot]", "tenseal==0.3.18", "statsmodels>=0.14,<0.16"]
+mobile = ["flask>=3.1,<4", "waitress>=3,<4"]
+all = ["defai[research,mobile,simulation]"]
+test = ["pytest>=8,<10", "pytest-cov", "dp-accounting>=0.5,<0.7", "ruff", "build", "hatchling"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
+packages = ["defai"]
+
+[tool.hatch.build.hooks.custom]
+
+[tool.hatch.build.targets.sdist]
+include = ["/defai", "/disease_research", "/scripts", "/tests", "/docs", "/pyproject.toml", "/hatch_build.py", "/LICENSE", "/README.md", "/.gitattributes"]
+exclude = ["**/__pycache__", "**/.pytest_cache", "**/*.pyc"]
 
 [tool.flwr.app]
 publisher = "rixile9999"
