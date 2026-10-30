@@ -14,7 +14,7 @@ def build():
     candidates = [*ROOT.glob("disease_research/**/*"), *ROOT.glob("scripts/*.py"),
                   *ROOT.glob("defai/**/*.py"), *ROOT.glob("docs/*.md"), ROOT / "README.md",
                   ROOT / ".gitattributes", ROOT / ".gitignore", ROOT / "pyproject.toml", ROOT / "LICENSE", ROOT / "hatch_build.py"]
-    for path in sorted(set(candidates)):
+    for path in sorted(set(candidates), key=lambda p: p.relative_to(ROOT).as_posix()):
         relative = path.relative_to(ROOT).as_posix()
         if not path.is_file() or any(p in {"__pycache__", ".pytest_cache", "_bundle", "build", "bin", ".gradle", ".idea"} for p in path.parts):
             continue
@@ -59,7 +59,7 @@ def build():
             "gan": find("GAN_research/gan_models.py"), "neonatal_algorithms": find("GAN_research/federated_algorithms.py")}
     catalog = {"schema": 1, "resources": resources, "api_modules": apis, "modules": modules,
                "resource_hashes": {r: hashlib.sha256((ROOT / r).read_bytes()).hexdigest() for r in resources}}
-    (ROOT / "defai/research/catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (ROOT / "defai/research/catalog.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(json.dumps({"resources": len(resources), "modules": len(modules)}))
 
 
